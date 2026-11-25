@@ -57,7 +57,7 @@ function nextRound() {
 function newBomb(h) {
   const [a, b] = G.set.short ? [20, 50] : [40, 120];
   return { id: 'b' + Math.random().toString(36).slice(2, 7), holder: h, hseq: ++G.seq, q: randQ(), qBy: null, extra: null, ans: '', extraAns: '',
-    fuse: rnd(a, b) * 1000, age: 0, heldMs: 0, lastPasser: null, recv: { [h]: 1 }, seal: null, sealKnown: false, idle: 0, proph: [], yogen: {}, lastAns: {}, fakeP: 0, done: false };
+    fuse: rnd(a, b) * 1000, age: 0, heldMs: 0, lastPasser: null, recv: { [h]: 1 }, seal: null, sealKnown: false, idle: 0, proph: [], yogen: {}, lastAns: {}, hist: {}, fakeP: 0, done: false };
 }
 function passTargets(b, from) {
   const others = G.players.filter(p => p.id !== from);
@@ -68,7 +68,13 @@ function passTargets(b, from) {
   return c.map(p => p.id);
 }
 function confirmHold(b) { P(b.holder).score += earned(b) * mult(); if (b.heldMs > 0) SX(b.holder).holds.push(b.heldMs); b.heldMs = 0; }
-function saveAns(b) { b.lastAns[b.holder] = b.extra ? { q: b.extra.text, a: b.extraAns } : { q: b.q, a: b.ans }; }
+function saveAns(b) {
+  b.lastAns[b.holder] = b.extra ? { q: b.extra.text, a: b.extraAns } : { q: b.q, a: b.ans };
+  // このラウンドでその人が答えたものをすべて残す(爆発したときにまとめて見せる)
+  const h = b.hist[b.holder] = b.hist[b.holder] || [];
+  h.push({ q: b.q, a: b.ans, t: ++G.seq });
+  if (b.extra) h.push({ q: b.extra.text, a: b.extraAns, t: ++G.seq });
+}
 function handTo(b, to, q, from) {
   if (b.holder) net.clearDraft(b.holder);
   b.holder = to; b.hseq = ++G.seq; b.q = q; b.qBy = from; b.ans = ''; b.extra = null; b.extraAns = ''; b.heldMs = 0; b.lastPasser = from; b.seal = null; b.sealKnown = false;
@@ -131,21 +137,26 @@ function useBoom(c, uid) {
 function resolveBoom() {
   const B = G.boom, b = B.b, m = mult(), entries = [], others = [];
   const hit = [B.victim]; if (B.drag && !hit.includes(B.drag)) hit.push(B.drag);
-  const burn = (bb, pid, tag) => {
+  const burn = (bb, pid, tag, onlyCur) => {
     const isH = pid === bb.holder, cur = isH ? earned(bb) : 0, pts = []; SX(pid).boom++; if (isH && bb.heldMs > 0) SX(pid).holds.push(bb.heldMs);
-    let r = isH ? (bb.extra ? { q: bb.extra.text, a: bb.extraAns } : { q: bb.q, a: bb.ans }) : bb.lastAns[pid];
+    const items = [];
+    if (!onlyCur) for (const x of G.bombs) for (const it of (x.hist[pid] || [])) items.push(it);
+    if (isH) { items.push({ q: bb.q, a: bb.ans, t: 1e12 }); if (bb.extra) items.push({ q: bb.extra.text, a: bb.extraAns, t: 1e12 + 1 }); }
+    items.sort((x, y) => x.t - y.t);
+    let r = items.length ? items[items.length - 1] : null;
+    const more = items.slice(0, -1).filter(x => x.a && P(x.a)).map(x => ({ q: x.q, a: nm(x.a) }));
     let d = -(3 + 2 * cur) * m;
     pts.push(cur ? `爆発 ${M}${(3 + 2 * cur) * m}(3+持っていた分${cur}×2${m > 1 ? '、2倍' : ''})` : `爆発 ${M}${3 * m}`);
     if (!r) r = { q: '', a: '', none: true };
     else { r = { q: r.q, a: r.a && P(r.a) ? nm(r.a) : '' }; if (!r.a) { d -= m; pts.push(`答えられなかった ${M}${m}`); } }
-    P(pid).score += d; entries.push({ pid, q: r.q, a: r.a, none: !!r.none, tag, pts });
+    P(pid).score += d; entries.push({ pid, q: r.q, a: r.a, none: !!r.none, tag, pts, more });
     if (!r.none) G.history.push({ name: nm(pid), q: r.q, a: r.a });
   };
   for (const pid of hit) burn(b, pid, pid === B.drag ? '道連れで爆発' : (B.sub && pid === B.victim ? '身代わりで爆発' : ''));
   b.heldMs = 0; b.done = true; net.clearDraft(b.holder);
   if (!B.drag && B.causer && !hit.includes(B.causer)) { P(B.causer).score += 2 * m; others.push(`${nm(B.causer)} 爆発させた +${2 * m}`); }
   for (const pr of b.proph) if (hit.includes(pr.target)) { P(pr.by).score += 3 * m; others.push(`${nm(pr.by)} 予言が的中 +${3 * m}`); }
-  if (G.final) for (const o of G.bombs) if (!o.done && hit.includes(o.holder)) { burn(o, o.holder, '誘爆'); o.heldMs = 0; o.done = true; net.clearDraft(o.holder); }
+  if (G.final) for (const o of G.bombs) if (!o.done && hit.includes(o.holder)) { burn(o, o.holder, '誘爆', true); o.heldMs = 0; o.done = true; net.clearDraft(o.holder); }
   if (!G.final) hit.forEach(pid => deal(P(pid)));
   G.reveal = { entries, others }; G.boom = null; G.phase = 'reveal';
 }
@@ -401,7 +412,9 @@ function render() {
     h = `${burstSVG()}<div class="center boom"><span class="k">${fl ? `${icon(fl.c, 'sm')}${esc(nm(fl.who))}が${CARDS[fl.c].n}を使った` : '&nbsp;'}</span><span class="h dg">爆発</span><span class="nm dg">${esc(nm(B.victim))}</span><span class="cd">最後の手段 あと${Math.max(0, Math.ceil(B.left / 1000))}秒</span></div>`;
   } else if (G.phase === 'reveal') {
     const R = G.reveal;
-    h = meta + `<div class="rv ${R.entries.length > 1 ? 'two' : ''}">${R.entries.map(e => `<div><div><div class="nm dg">${esc(nm(e.pid))}</div><div class="tg">${e.tag ? esc(e.tag) : 'の答え'}</div><div class="rq">${e.none ? '' : esc(e.q)}</div></div><div><div class="ra ${e.none || !(e.a && e.a.trim()) ? 'none' : ''}">${e.none ? 'この爆弾では答えていません' : (e.a && e.a.trim() ? esc(e.a) : '答えられなかった')}</div><div class="pt">${e.pts.map(esc).join(' / ')}</div></div></div>`).join('')}</div>` + (R.others.length ? `<div class="foot">${R.others.map(x => `<b>${esc(x)}</b>`).join('  ・  ')}</div>` : '');
+    const lim = R.entries.length > 1 ? 3 : 6, sq = q => String(q || '').replace('この中で一番、', '');
+    const moreHTML = e => e.more && e.more.length ? `<div class="more"><p class="mh">このラウンドのほかの答え</p>${e.more.slice(-lim).map(x => `<p><span>${esc(sq(x.q))}</span><b>${esc(x.a)}</b></p>`).join('')}${e.more.length > lim ? `<p class="mx">ほか${e.more.length - lim}件</p>` : ''}</div>` : '';
+    h = meta + `<div class="rv ${R.entries.length > 1 ? 'two' : ''}">${R.entries.map(e => `<div><div><div class="nm dg">${esc(nm(e.pid))}</div><div class="tg">${e.tag ? esc(e.tag) : 'の答え'}</div><div class="rq">${e.none ? '' : esc(e.q)}</div></div><div><div class="ra ${e.none || !(e.a && e.a.trim()) ? 'none' : ''}">${e.none ? 'この爆弾では答えていません' : (e.a && e.a.trim() ? esc(e.a) : '答えられなかった')}</div><div class="pt">${e.pts.map(esc).join(' / ')}</div>${moreHTML(e)}</div></div>`).join('')}</div>` + (R.others.length ? `<div class="foot">${R.others.map(x => `<b>${esc(x)}</b>`).join('  ・  ')}</div>` : '');
   } else if (G.phase === 'score') {
     h = `<div class="meta"><span>途中経過</span><span>全${G.set.rounds}ラウンド+最終ラウンド</span></div><div class="ttl dg">第${G.round}ラウンド終了</div>${table()}`;
   } else if (G.phase === 'end') {

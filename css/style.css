@@ -386,3 +386,15 @@ body.holding #pctl{display:none}
 .ownq{margin-top:8px}
 .ownq input{width:100%;border:0;border-bottom:1.5px solid var(--pink);border-radius:0;background:transparent;color:var(--pink);font:inherit;font-size:17px;padding:8px 0}
 .ownq .x{margin:6px 0 0;font-size:12px;color:var(--psub)}
+
+/* 爆発した人の、このラウンドのほかの答え */
+.rv .more{margin-top:1.8cqw}
+.rv .more p{display:flex;justify-content:space-between;align-items:baseline;gap:2cqw;margin:0;padding:.6cqw 0;border-bottom:1px solid var(--tvrule);font-size:1.6cqw;line-height:1.45}
+.rv .more p span{color:var(--tvsub);min-width:0}
+.rv .more p b{color:var(--tvink);font-weight:700;white-space:nowrap}
+.rv .more .mh{display:block;border-bottom:1px solid var(--tvsub);color:var(--tvsub);font-size:1.4cqw;padding-top:0}
+.rv .more .mx{display:block;border:0;color:var(--tvsub);font-size:1.4cqw}
+.rv.two .more p{font-size:1.35cqw;padding:.4cqw 0}
+.rv{align-content:start;padding-top:1cqw}
+.solo .rv .more p{font-size:max(1.6cqw,11px)}
+.solo .rv .more .mh,.solo .rv .more .mx{font-size:max(1.4cqw,10px)}
