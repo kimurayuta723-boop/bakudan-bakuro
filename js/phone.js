@@ -1,5 +1,5 @@
 // スマホ。テレビから届いた公開情報(S)と、自分だけの情報(V)で画面を組み立て、操作をテレビへ送る。
-import { esc, now, M, WHEN, CARDS, icon, AX, TYPES, tyIll, isWho, valid, strong, choices, pipsHTML } from './shared.js';
+import { esc, now, M, WHEN, CARDS, icon, AX, TYPES, tyIll, valid, strong, choices, pipsHTML, ownQ } from './shared.js';
 import { createNet } from './net.js';
 import { buzz } from './sound.js';
 
@@ -47,24 +47,35 @@ function choiceList(key, list, act, bid) {
   return list.map((t, i) => `<button class="ch ${v === String(i) ? 'on' : ''}" data-act="${act}" data-b="${bid}" data-i="${i}"><i class="dot"></i><span>${esc(t)}</span></button>`).join('') +
     `<button class="ch ${v === 'own' ? 'on' : ''}" data-act="${act}" data-b="${bid}" data-i="own"><i class="dot"></i><span>自分で書く</span></button>`;
 }
-const nameChips = (bid, field) => `<div class="chips">${S.players.filter(p => p.id !== uid).map(p => `<button class="chip" data-act="ins" data-b="${bid}" data-f="${field}" data-v="${esc(p.name)}">${esc(p.name)}</button>`).join('')}</div>`;
 const hk = b => b.id + '-' + b.hseq;
+const ownInput = (key) => `<div class="ownq"><input data-k="${key}" maxlength="40" value="この中で一番、" autocomplete="off" enterkeyhint="done"><p class="warn" data-w="${key}"></p><p class="x">「この中で一番、〜のは?」の形で書きます。</p></div>`;
+const pickNames = (bid, act, sel) => `<div class="pick">${S.players.filter(p => p.id !== uid).map(p => `<button class="pk ${sel === p.id ? 'on' : ''}" data-act="${act}" data-b="${bid}" data-v="${p.id}">${esc(p.name)}</button>`).join('')}</div>`;
 
 /* ---------- 持っているとき ---------- */
+// 時間との勝負なので、上から順に「答え→相手→質問→渡す」をタップだけで進められるようにする
 function holdHTML(b) {
   const id = b.id, k = hk(b);
   if (!ui['qo-' + k]) ui['qo-' + k] = choices(level(), b.q);
+  if (ui['nq-' + k] == null) ui['nq-' + k] = 'この中で一番、';
   const opts = passTargets(b, uid);
   return `<div class="band"><div><p>あなたが持っています</p><p class="bs" data-live="risk"></p></div><b data-live="earn">+0</b></div>
  <p class="peek" data-live="peek"></p><div data-sub="ctl"></div>
- <div class="blk"><p class="h"><span>答える</span><span>${qLabel(b)}</span></p><p class="qt">${esc(b.q)}</p>
- <textarea rows="3" maxlength="120" data-k="ans-${k}" data-f="ans" data-b="${id}" placeholder="5文字以上で答える"></textarea>${isWho(b.q) ? nameChips(id, 'ans') : ''}<p class="warn" data-w="ans-${k}"></p></div>
+ <div class="blk" data-step="ans"><p class="step"><b>1</b>当てはまる人を選ぶ<span>${qLabel(b)}</span></p><p class="qt">${esc(b.q)}</p>${pickNames(id, 'ans', ui['ans-' + k])}</div>
  <div data-sub="extra"></div>
- <div class="blk"><p class="h"><span>渡す相手</span><span>右の印は手札の枚数(ラウンド開始時)</span></p><div class="grid2">${opts.map(o => `<button class="opt ${ui['to-' + k] === o ? 'on' : ''}" data-act="to" data-b="${id}" data-v="${o}"><span>${esc(nm(o))}</span>${pipsHTML(P(o).pips || 0)}</button>`).join('')}</div></div>
- <div class="blk"><p class="h"><span>その人への質問</span><span>選ぶか、自分で書く</span></p>${choiceList('qc-' + k, ui['qo-' + k], 'qc', id)}
- <div class="own" data-own="${k}" ${ui['qc-' + k] === 'own' ? '' : 'hidden'}><textarea rows="2" maxlength="80" data-k="nq-${k}" placeholder="5文字以上"></textarea><p class="warn" data-w="nq-${k}"></p></div></div>
- <div data-sub="pc"></div><p class="err" data-err="${id}"></p>
- <div data-sub="go"></div>`;
+ <div class="blk" data-step="to"><p class="step"><b>2</b>次に渡す相手<span>□は手札の枚数</span></p><div class="pick">${opts.map(o => `<button class="pk ${ui['to-' + k] === o ? 'on' : ''}" data-act="to" data-b="${id}" data-v="${o}"><span>${esc(nm(o))}</span>${pipsHTML(P(o).pips || 0)}</button>`).join('')}</div></div>
+ <div class="blk" data-step="q"><p class="step"><b>3</b>その人への質問</p>${choiceList('qc-' + k, ui['qo-' + k], 'qc', id)}
+ <div class="own" data-own="${k}" ${ui['qc-' + k] === 'own' ? '' : 'hidden'}>${ownInput('nq-' + k)}</div></div>
+ <div data-sub="pc"></div>
+ <div class="passbar" data-sub="go"></div>`;
+}
+function holdNeed(b) {
+  const k = hk(b), n = [];
+  if (!ui['ans-' + k]) n.push(['ans', '答え']);
+  if (b.extra && !ui['ex-' + k]) n.push(['ex', '追い質問の答え']);
+  if (!ui['to-' + k] || !passTargets(b, uid).includes(ui['to-' + k])) n.push(['to', '渡す相手']);
+  const qc = ui['qc-' + k];
+  if (qc == null || (qc === 'own' && !valid(ownQ(ui['nq-' + k]).replace('この中で一番、', '')))) n.push(['q', '質問']);
+  return n;
 }
 function holdSubs(s, b) {
   const id = b.id, k = hk(b), cards = myCards(), sk = (V.sk || []).includes(id);
@@ -72,16 +83,24 @@ function holdSubs(s, b) {
   patch(s.querySelector('[data-sub="ctl"]'), JSON.stringify([b.seal, sk, canRet, canPeek]),
     (b.seal ? `<p class="seal"><b>封印</b> この爆弾ではカードが使えません。${sk ? 'ニセ封印と分かりました。' : '試しに使うと、本物なら効果なしで失われます。'}</p>` : '') +
     (canRet || canPeek ? `<div class="row">${canRet ? `<button class="ol" data-act="ret" data-b="${id}">${icon('uchikaeshi')}打ち返し(${esc(nm(b.lp))}へ返す)</button>` : ''}${canPeek ? `<button class="ol" data-act="peek" data-b="${id}">${icon('nozokimi')}のぞき見</button>` : ''}</div>` : ''));
-  patch(s.querySelector('[data-sub="extra"]'), b.extra ? b.extra.text : '', b.extra ? `<div class="blk"><p class="h"><span>追い質問にも答える</span><span>${esc(nm(b.extra.by))}から</span></p><p class="qt">${esc(b.extra.text)}</p><textarea rows="2" maxlength="120" data-k="ex-${k}" data-f="ex" data-b="${id}" placeholder="爆発したらこちらが出ます"></textarea>${isWho(b.extra.text) ? nameChips(id, 'ex') : ''}<p class="warn" data-w="ex-${k}"></p></div>` : '');
+  patch(s.querySelector('[data-sub="extra"]'), b.extra ? b.extra.text : '', b.extra ? `<div class="blk" data-step="ex"><p class="step"><b>1</b>追い質問にも選ぶ<span>${esc(nm(b.extra.by))}から ・ 爆発したらこちらが出ます</span></p><p class="qt">${esc(b.extra.text)}</p>${pickNames(id, 'ex', ui['ex-' + k])}</div>` : '');
   const pcs = [...new Set(cards.filter(c => CARDS[c].w === 'pass'))];
-  patch(s.querySelector('[data-sub="pc"]'), pcs.join(), pcs.length ? `<div class="blk"><p class="h"><span>渡すときに使うカード</span><span>2枚まで</span></p><div class="grid2">${pcs.map(c => `<button class="opt ${ui[`pc-${k}-${c}`] ? 'on' : ''}" data-act="pcard" data-b="${id}" data-v="${c}"><span class="wi">${icon(c)}${CARDS[c].n}</span></button>`).join('')}</div></div>` : '');
-  const busy = !!sending[k];
-  patch(s.querySelector('[data-sub="go"]'), String(busy), `<button class="go" data-act="pass" data-b="${id}" ${busy ? 'disabled' : ''}>${busy ? '送信中' : '渡す'}</button>`);
+  patch(s.querySelector('[data-sub="pc"]'), pcs.join(), pcs.length ? `<div class="blk"><p class="step"><b>+</b>渡すときに使うカード<span>2枚まで ・ 使わなくてもよい</span></p><div class="pick">${pcs.map(c => `<button class="pk ${ui[`pc-${k}-${c}`] ? 'on' : ''}" data-act="pcard" data-b="${id}" data-v="${c}"><span class="wi">${icon(c)}${CARDS[c].n}</span></button>`).join('')}</div></div>` : '');
+  const busy = !!sending[k], need = holdNeed(b);
+  patch(s.querySelector('[data-sub="go"]'), JSON.stringify([busy, need]),
+    `<p class="need">${busy ? '送信しています' : need.length ? 'あと:' + need.map(x => x[1]).join('・') : '準備ができました'}</p><button class="go ${need.length ? 'wait' : ''}" data-act="pass" data-b="${id}" ${busy ? 'disabled' : ''}>${busy ? '送信中' : '渡す'}</button>`);
   const m = mult(), e = earned(b);
   s.querySelector('[data-live="earn"]').textContent = '+' + e * m;
   s.querySelector('[data-live="risk"]').textContent = `いま爆発すると ${M}${(3 + 2 * e) * m}`;
   const pk = V.peek && V.peek.b === id ? V.peek : null;
   s.querySelector('[data-live="peek"]').textContent = pk ? `のぞき見:残り ${pk.remain}秒` : '';
+}
+function nextStep(s, after) {
+  const order = ['ans', 'ex', 'to', 'q'], el = after && s.querySelector(`[data-step="${order[order.indexOf(after) + 1]}"]`) || null;
+  const b = live().find(x => s.dataset.sec === x.id); if (!b) return;
+  const need = holdNeed(b); if (!need.length) return;
+  const tgt = s.querySelector(`[data-step="${need[0][0]}"]`);
+  if (tgt && tgt !== s.querySelector(`[data-step="${after}"]`)) tgt.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 /* ---------- 持っていないとき ---------- */
@@ -108,7 +127,7 @@ function handHTML() {
     if (c === 'oishitsumon') {
       if (tb.extra) return `<p class="x">この爆弾には、もう追い質問が付いています。</p>`;
       if (!ui['oo-' + id]) ui['oo-' + id] = choices(level(), tb.q);
-      return `<div style="margin-top:6px">${choiceList('oc-' + id, ui['oo-' + id], 'oc', id)}</div><div class="own" data-own="o${id}" ${ui['oc-' + id] === 'own' ? '' : 'hidden'}><textarea rows="2" maxlength="80" data-k="on-${id}" placeholder="5文字以上"></textarea><p class="warn" data-w="on-${id}"></p></div><div class="row"><button class="ol" data-act="oi" data-b="${id}">${esc(nm(tb.holder))}に足す</button></div>`;
+      return `<div style="margin-top:6px">${choiceList('oc-' + id, ui['oo-' + id], 'oc', id)}</div><div class="own" data-own="o${id}" ${ui['oc-' + id] === 'own' ? '' : 'hidden'}>${ownInput('on-' + id)}</div><div class="row"><button class="ol" data-act="oi" data-b="${id}">${esc(nm(tb.holder))}に足す</button></div>`;
     }
     if (c === 'toushi') return `<div class="chips">${others.map(p => `<button class="chip ${ui['ts-' + id] === p.id ? 'on' : ''}" data-act="pickc" data-k="ts-${id}" data-v="${p.id}">${esc(p.name)}</button>`).join('')}</div><div class="row"><button class="ol" data-act="toushi" data-b="${id}">手札を見る</button></div>`;
     return '';
@@ -154,12 +173,14 @@ function render() {
   if (S.phase === 'play') {
     const l = live(), mk = 'play' + l.map(b => b.id + ':' + (b.holder === uid ? 'H' + b.hseq : 'I')).join(',');
     const mine = l.filter(b => b.holder === uid), idle = l.filter(b => b.holder !== uid);
+    document.body.classList.toggle('holding', mine.length > 0);
     const mk2 = mk + (idle.length ? '|idle' : '');
     if (pm.dataset.key !== mk2 && !composingIn(pm)) { pm.innerHTML = mine.map(b => `<section data-sec="${b.id}"></section>`).join('') + (idle.length ? '<section data-sec="idle"></section>' : ''); pm.dataset.key = mk2; }
     for (const b of mine) { const s = pm.querySelector(`[data-sec="${b.id}"]`); if (!s) continue; if (patch(s, 'H' + hk(b), holdHTML(b))) buzz(180); holdSubs(s, b); }
     const si = pm.querySelector('[data-sec="idle"]');
     if (si) patch(si, 'I' + idle.map(b => b.id + b.holder + b.idle).join(','), S.bombs.length > 1 ? (mine.length ? '' : '<p class="st dg">最終ラウンド</p>') + idleListHTML(idle) : idleHTML(idle[0]));
   } else {
+    document.body.classList.remove('holding');
     let k = S.phase, h = '';
     if (S.phase === 'lobby') { k += JSON.stringify(S.players);
       h = `<p class="st dg">参加しました</p><p class="mu">テレビで開始されるのを待っています。</p><div class="lobbyp"><p class="h">参加者 ${S.players.length}人</p>${S.players.map(p => `<span class="${p.on ? '' : 'off'}">${esc(p.name)}${p.id === S.ctrl ? '<i>幹事</i>' : ''}</span>`).join('')}</div>${S.ctrl === uid ? '<p class="mu">あなたは幹事です。下のボタンで、ゲームの開始や進行ができます。</p>' : ''}`; }
@@ -183,7 +204,7 @@ function render() {
 function setChoice(t, key, ownSel) {
   const v = t.dataset.i; ui[key] = v;
   t.parentElement.querySelectorAll(`[data-act="${t.dataset.act}"]`).forEach(x => x.classList.toggle('on', x === t));
-  const own = document.querySelector(ownSel); if (own) { own.hidden = v !== 'own'; if (v === 'own') { const ta = own.querySelector('textarea'); if (ta) ta.focus(); } }
+  const own = document.querySelector(ownSel); if (own) { own.hidden = v !== 'own'; if (v === 'own') { const ta = own.querySelector('input,textarea'); if (ta) { ta.focus(); const n = ta.value.length; try { ta.setSelectionRange(n, n); } catch (x) { } } } }
 }
 function sendDraft(b) {
   clearTimeout(draftTimer);
@@ -193,7 +214,7 @@ document.addEventListener('compositionstart', () => composing = true);
 document.addEventListener('compositionend', () => composing = false);
 document.addEventListener('input', e => {
   const el = e.target; if (!el.dataset || !el.dataset.k) return; ui[el.dataset.k] = el.value; warn(el);
-  if (el.dataset.f && S) { const b = live().find(x => x.id === el.dataset.b); if (b && b.holder === uid) sendDraft(b); }
+  if (S && /^nq-/.test(el.dataset.k)) render();
 });
 let abortArm = 0;
 document.addEventListener('click', e => {
@@ -208,25 +229,20 @@ document.addEventListener('click', e => {
   if (S.phase !== 'play' || !b || b.done) return;
   const k = hk(b);
   const err = m => { const el = document.querySelector(`[data-err="${b.id}"]`); if (el) el.textContent = m; };
-  if (act === 'to') { ui['to-' + k] = t.dataset.v; t.parentElement.querySelectorAll('.opt').forEach(x => x.classList.toggle('on', x === t)); return; }
-  if (act === 'qc') { setChoice(t, 'qc-' + k, `[data-own="${k}"]`); return; }
+  if (act === 'to') { ui['to-' + k] = t.dataset.v; t.parentElement.querySelectorAll('.pk').forEach(x => x.classList.toggle('on', x === t)); render(); const sec = t.closest('[data-sec]'); setTimeout(() => nextStep(sec, 'to'), 120); return; }
+  if (act === 'qc') { setChoice(t, 'qc-' + k, `[data-own="${k}"]`); render(); return; }
   if (act === 'oc') { setChoice(t, 'oc-' + b.id, `[data-own="o${b.id}"]`); return; }
   if (act === 'pcard') { const kk = `pc-${k}-${t.dataset.v}`; ui[kk] = !ui[kk]; t.classList.toggle('on', !!ui[kk]); return; }
-  if (act === 'ins') {
-    const kk = (t.dataset.f === 'ans' ? 'ans-' : 'ex-') + k, ta = document.querySelector(`[data-k="${kk}"]`); if (!ta) return;
-    const s = ta.selectionStart ?? ta.value.length, v = (ta.value.slice(0, s) + t.dataset.v + ta.value.slice(ta.selectionEnd ?? s)).slice(0, 120);
-    ta.value = v; ui[kk] = v; ta.focus(); const p = s + t.dataset.v.length; try { ta.setSelectionRange(p, p); } catch (x) { } warn(ta); sendDraft(b); return;
+  if (act === 'ans' || act === 'ex') {
+    ui[act + '-' + k] = t.dataset.v; t.parentElement.querySelectorAll('.pk').forEach(x => x.classList.toggle('on', x === t));
+    sendDraft(b); render(); const sec = t.closest('[data-sec]'); setTimeout(() => nextStep(sec, act), 120); return;
   }
   if (act === 'pass' && b.holder === uid) {
-    const ans = ui['ans-' + k] || '', ex = ui['ex-' + k] || '', to = ui['to-' + k], qc = ui['qc-' + k];
-    const q = qc === 'own' ? (ui['nq-' + k] || '') : (qc != null ? ui['qo-' + k][+qc] : '');
-    const pc = Object.keys(CARDS).filter(c => ui[`pc-${k}-${c}`] && cards.includes(c));
-    if (!valid(ans)) return err('答えは5文字以上で書いてください。同じ文字だけの答えは送れません。');
-    if (b.extra && !valid(ex)) return err('追い質問にも5文字以上で答えてください。');
-    if (!to || !passTargets(b, uid).includes(to)) return err('渡す相手を選んでください。');
-    if (qc == null) return err('その人への質問を選んでください。');
-    if (!valid(q)) return err('自分で書く質問は5文字以上にしてください。');
-    if (pc.length > 2) return err('一度に使えるカードは2枚までです。');
+    const need = holdNeed(b);
+    if (need.length) { const sec = t.closest('[data-sec]'), tgt = sec && sec.querySelector(`[data-step="${need[0][0]}"]`); if (tgt) { tgt.scrollIntoView({ behavior: 'smooth', block: 'center' }); tgt.classList.remove('hint'); void tgt.offsetWidth; tgt.classList.add('hint'); } return; }
+    const ans = ui['ans-' + k], ex = ui['ex-' + k] || '', to = ui['to-' + k], qc = ui['qc-' + k];
+    const q = qc === 'own' ? ownQ(ui['nq-' + k]) : ui['qo-' + k][+qc];
+    const pc = Object.keys(CARDS).filter(c => ui[`pc-${k}-${c}`] && cards.includes(c)).slice(0, 2);
     sending[k] = true; send({ t: 'pass', b: b.id, h: b.hseq, to, q, own: qc === 'own', cards: pc, ans, ex }); render(); return;
   }
   if (act === 'ret') { send({ t: 'ret', b: b.id }); t.disabled = true; return; }
@@ -235,8 +251,8 @@ document.addEventListener('click', e => {
   if (act === 'yogen') { const v = ui['yg-' + b.id]; if (!v) { noteShow = '予言する相手を選んでください。'; noteUntil = now() + 4000; render(); return; } send({ t: 'yogen', b: b.id, target: v }); t.disabled = true; return; }
   if (act === 'oi') {
     const oc = ui['oc-' + b.id]; if (oc == null) { noteShow = '追い質問を選んでください。'; noteUntil = now() + 4000; render(); return; }
-    const v = oc === 'own' ? (ui['on-' + b.id] || '') : ui['oo-' + b.id][+oc];
-    if (!valid(v)) { noteShow = '自分で書く追い質問は5文字以上にしてください。'; noteUntil = now() + 4000; render(); return; }
+    const v = oc === 'own' ? ownQ(ui['on-' + b.id] || '') : ui['oo-' + b.id][+oc];
+    if (!valid(v.replace('この中で一番、', ''))) { noteShow = '追い質問をもう少し長く書いてください。'; noteUntil = now() + 4000; render(); return; }
     send({ t: 'oi', b: b.id, q: v }); t.disabled = true; return;
   }
   if (act === 'toushi') { const v = ui['ts-' + b.id]; if (!v) { noteShow = '見る相手を選んでください。'; noteUntil = now() + 4000; render(); return; } send({ t: 'toushi', b: b.id, target: v }); t.disabled = true; }

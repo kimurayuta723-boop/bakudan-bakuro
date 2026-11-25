@@ -20,11 +20,11 @@ const CARDS={
  toushi:{n:'透視',set:2,w:'idle',d:'1人を選び、手札の中身をこっそり見る。'}
 };
 const Q={
- 1:['この中で一番、朝に弱そうなのは?','無人島に1人だけ連れて行くなら誰?','この中で一番、方向音痴なのは?','この中で、隠れた才能がありそうなのは?','この中で一番、お店選びを任せたいのは?','最近いちばん「変わったな」と思うのは誰?','この中で一番、怒らせたら怖いのは?','この中で一番、サプライズが下手そうなのは?','この中で一番、旅行の計画を立ててくれそうなのは?','この中で一番、料理が上手そうなのは?','この中で一番、休日に家から出なさそうなのは?','この中で一番、昔から変わらないのは?'],
- 2:['この中で一番、秘密を守れなさそうなのは?','この中で一番、LINEの返信が雑なのは?','第一印象といちばん違った人は誰?','この中で一番、見栄を張っていそうなのは?','この中で一番、恋愛で振り回されそうなのは?','正直、ノリが合わないと思ったことがあるのは誰?','この中で一番、お金にルーズそうなのは?','この中で一番、話を盛りがちなのは?','この中で一番、酔うと面倒なのは?','この中で一番、遅刻の言い訳がうまいのは?','この中で一番、モテると勘違いしていそうなのは?','この中で一番、人の話を聞いていないのは?'],
- 3:['この中で、お金を貸したら返ってこなさそうなのは?','この中で一番、元恋人を引きずっていそうなのは?','ここにいる人への、まだ言っていない不満を1つ','この中で一番、裏表がありそうなのは?','この中で、二人きりだと気まずいのは誰?','この中で一番、友達をやめそうになったことがあるのは?','この中で、結婚式のスピーチを頼みたくないのは誰?','この中で一番、本音を隠していそうなのは?','この中で一番、陰で愚痴を言っていそうなのは?','この中で一番、恋人にしたくないのは?','この中で一番、損得で付き合っていそうなのは?','この中で一番、自分を盛って話していそうなのは?']
+ 1:['この中で一番、寝坊して約束に遅れそうなのは?','この中で一番、方向音痴なのは?','この中で一番、部屋が散らかっていそうなのは?','この中で一番、話が長いのは?','この中で一番、写真写りを気にしすぎるのは?','この中で一番、すぐ人に流されるのは?','この中で一番、財布を忘れてきそうなのは?','この中で一番、三日坊主なのは?','この中で一番、LINEの既読無視が多いのは?','この中で一番、自慢話が多いのは?','この中で一番、酔うと同じ話をくり返すのは?','この中で一番、店員さんに強気なのは?'],
+ 2:['この中で一番、秘密を守れなさそうなのは?','この中で一番、見栄を張っていそうなのは?','この中で一番、話を盛っていそうなのは?','この中で一番、人の話を聞いていないのは?','この中で一番、ドタキャンが多そうなのは?','この中で一番、モテると勘違いしていそうなのは?','この中で一番、お金にルーズそうなのは?','この中で一番、酔うと面倒なのは?','この中で一番、遅刻の言い訳がうまいのは?','この中で一番、SNSに盛った写真を載せていそうなのは?','この中で一番、割り勘で得をしようとしそうなのは?','この中で一番、怒らせると根に持つのは?'],
+ 3:['この中で一番、浮気をしそうなのは?','この中で一番、お金を貸したら返ってこなさそうなのは?','この中で一番、裏で悪口を言っていそうなのは?','この中で一番、平気で嘘をつきそうなのは?','この中で一番、元恋人を引きずっていそうなのは?','この中で一番、友達を裏切りそうなのは?','この中で一番、怪しい儲け話に乗りそうなのは?','この中で一番、結婚式のスピーチを頼みたくないのは?','この中で一番、二股をかけていそうなのは?','この中で一番、損得だけで人と付き合っていそうなのは?','この中で一番、いつか週刊誌に載りそうなのは?','この中で一番、恋人のスマホをこっそり見ていそうなのは?']
 };
-const STRONG={2:['ルーズ','見栄','嘘','不満','嫌'],3:['元恋人','元カレ','元カノ','浮気','借金','年収','裏表','気まず','嫌い','最低','愚痴'],4:['ブス','ハゲ','デブ','キモ','死ね','クズ']};
+const STRONG={2:['見栄','盛っ','ルーズ','ドタキャン','嘘','根に持'],3:['浮気','二股','裏切','悪口','借金','元恋人','週刊誌','スマホを','儲け話'],4:['ブス','ハゲ','デブ','キモ','死ね','クズ']};
 /* ---------- 絵柄(64×64の線画。朱は1か所だけ) ---------- */
 const BM=(x,y,r,sp=true)=>`<circle cx="${x}" cy="${y}" r="${r}"/><path d="M${(x+r*.62).toFixed(1)} ${(y-r*.78).toFixed(1)}q3 -6 8 -6"/>${sp?`<circle class="a" cx="${(x+r*.62+8).toFixed(1)}" cy="${(y-r*.78-6).toFixed(1)}" r="2.4"/>`:''}`;
 const HU=(x,y)=>`<circle cx="${x}" cy="${y}" r="5.5"/><path d="M${x-10} ${y+21}q0 -12 10 -12q10 0 10 12"/>`;
@@ -92,10 +92,12 @@ const TILL={
  RGS:`<path d="M36 70l44-18 44 18v52l-44 18-44-18z" class="fl"/><path d="M36 70l44 18 44-18M80 88v52"/><path d="M58 61l44 18" class="th"/><path d="M92 54q6-18 22-20"/><circle class="a" cx="118" cy="32" r="4"/><path d="M14 92h14M8 106h20" class="th"/>`
 };
 const tyIll=(c,cls='')=>`<svg class="ti ${cls}" viewBox="0 0 160 160" aria-hidden="true">${TILL[c]}</svg>`;
-const isWho=q=>/誰|のは/.test(q||'');
+const isWho=()=>true;
+const QHEAD='この中で一番、',QTAIL='のは?';
+const ownQ=v=>{let t=String(v||'').trim();if(!t.startsWith('この中で'))t=QHEAD+t;if(!/[?？]$/.test(t))t+='?';return t};
 const valid=t=>{const s=(t||'').replace(/\s/g,'');return s.length>=5&&!/^(.)\1*$/.test(s)};
 function strong(t,level){if(!t)return false;for(const l of [2,3,4])if(l>level)for(const w of STRONG[l])if(t.includes(w))return true;return false}
 function qPool(level,not){let pool=[];for(let l=1;l<=level;l++)pool=pool.concat(Q[l].map(t=>({t,l})));return pool.filter(x=>x.t!==not)}
 function choices(level,not,used=[]){let pool=qPool(level,not);const fresh=pool.filter(x=>!used.includes(x.t));if(fresh.length>=4)pool=fresh;const top=shuffle(pool.filter(x=>x.l===level)),rest=shuffle(pool.filter(x=>x.l!==level));return shuffle(top.slice(0,2).concat(rest,top.slice(2)).slice(0,4)).map(x=>x.t)}
 const pipsHTML=n=>`<svg class="pv" viewBox="0 0 14 12" aria-hidden="true">${[0,1].map(i=>`<rect x="${.75+i*8}" y=".75" width="4.5" height="10.5" fill="${i<n?'currentColor':'none'}" stroke="currentColor" stroke-width="1.2"/>`).join('')}</svg>`;
-export {esc,rnd,pick,shuffle,now,M,WHEN,CARDS,Q,STRONG,BM,HU,ST,ICON,icon,TVLINE,OFF,AX,TYPES,TB,TILL,tyIll,isWho,valid,pipsHTML,strong,qPool,choices};
+export {QHEAD,QTAIL,ownQ,esc,rnd,pick,shuffle,now,M,WHEN,CARDS,Q,STRONG,BM,HU,ST,ICON,icon,TVLINE,OFF,AX,TYPES,TB,TILL,tyIll,isWho,valid,pipsHTML,strong,qPool,choices};

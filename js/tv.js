@@ -137,7 +137,7 @@ function resolveBoom() {
     let d = -(3 + 2 * cur) * m;
     pts.push(cur ? `爆発 ${M}${(3 + 2 * cur) * m}(3+持っていた分${cur}×2${m > 1 ? '、2倍' : ''})` : `爆発 ${M}${3 * m}`);
     if (!r) r = { q: '', a: '', none: true };
-    else if (!r.a || !r.a.trim()) { d -= m; pts.push(`答えられなかった ${M}${m}`); }
+    else { r = { q: r.q, a: r.a && P(r.a) ? nm(r.a) : '' }; if (!r.a) { d -= m; pts.push(`答えられなかった ${M}${m}`); } }
     P(pid).score += d; entries.push({ pid, q: r.q, a: r.a, none: !!r.none, tag, pts });
     if (!r.none) G.history.push({ name: nm(pid), q: r.q, a: r.a });
   };
@@ -172,22 +172,20 @@ function diagnose() {
 
 
 /* ---------- CPU ---------- */
-const CPU_WHO = ['{n}かな。理由は内緒', '迷うけど{n}', '{n}だと思う', '正直に言うと{n}', '{n}。前から思っていた', '{n}。本人も分かっているはず'];
-const CPU_FREE = ['{n}の遅刻ぐせが気になる', '{n}の店選びはいつも駅から遠い', '{n}の話はたまに長い', '{n}の返信が遅いのが気になる'];
-function cpuAnswer(q, self) { const n = pick(G.players.filter(p => p.id !== self)).name; return pick(/誰|のは/.test(q) ? CPU_WHO : CPU_FREE).replace('{n}', n); }
+function cpuAnswer(q, self) { return pick(G.players.filter(p => p.id !== self)).id; }
 function botHolder(b) {
   const p = P(b.holder);
   if (!b.plan || b.plan.h !== b.hseq) {
     const typ = rnd(5, 13) * 1000 * (G.set.short ? .7 : 1);
-    b.plan = { h: b.hseq, typ, passAt: typ + rnd(1, 6) * 1000, full: cpuAnswer(b.q, p.id),
+    b.plan = { h: b.hseq, typ, pickAt: rnd(1500, 5000), passAt: typ + rnd(1, 6) * 1000, full: cpuAnswer(b.q, p.id),
       retAt: b.lastPasser && p.cards.includes('uchikaeshi') && Math.random() < .35 ? rnd(1500, 4000) : null,
       peekAt: p.cards.includes('nozokimi') && Math.random() < .3 ? rnd(2000, 5000) : null };
   }
   const pl = b.plan;
-  b.ans = pl.full.slice(0, Math.floor(pl.full.length * Math.min(1, b.heldMs / pl.typ)));
+  b.ans = b.heldMs >= pl.pickAt ? pl.full : '';
   if (b.extra) {
     if (!pl.ex) { pl.ex = cpuAnswer(b.extra.text, p.id); pl.exAt = b.heldMs; pl.passAt = Math.max(pl.passAt, b.heldMs + rnd(4, 8) * 1000); }
-    b.extraAns = pl.ex.slice(0, Math.floor(pl.ex.length * Math.min(1, (b.heldMs - pl.exAt) / 4000)));
+    b.extraAns = b.heldMs - pl.exAt >= 2500 ? pl.ex : '';
   }
   if (pl.retAt != null && b.heldMs >= pl.retAt) { pl.retAt = null; if (p.cards.includes('uchikaeshi') && sealGate(b, p.id, 'uchikaeshi')) { doReturn(b, p.id); return; } }
   if (pl.peekAt != null && b.heldMs >= pl.peekAt) { pl.peekAt = null; if (p.cards.includes('nozokimi') && sealGate(b, p.id, 'nozokimi')) rm(p, 'nozokimi'); }
@@ -244,11 +242,12 @@ function handleAct(a) {
   const txt = v => String(v || '').slice(0, 120);
   if (a.t === 'pass') {
     if (G.phase !== 'play' || !b || b.done || b.holder !== u || a.h !== b.hseq) return;
-    b.ans = txt(a.ans); if (b.extra) b.extraAns = txt(a.ex);
-    if (!valid(b.ans)) return note(u, '答えは5文字以上で書いてください。');
-    if (b.extra && !valid(b.extraAns)) return note(u, '追い質問にも5文字以上で答えてください。');
+    const okId = v => v && v !== u && P(v) ? v : '';
+    b.ans = okId(a.ans); if (b.extra) b.extraAns = okId(a.ex);
+    if (!b.ans) return note(u, '答えの人を選んでください。');
+    if (b.extra && !b.extraAns) return note(u, '追い質問の答えも選んでください。');
     if (!passTargets(b, u).includes(a.to)) return note(u, 'その人には渡せません。もう一度選んでください。');
-    const q = txt(a.q).slice(0, 80); if (!valid(q)) return note(u, '質問は5文字以上にしてください。');
+    const q = txt(a.q).slice(0, 60); if (!valid(q)) return note(u, '質問をもう少し長く書いてください。');
     const cards = [...new Set(a.cards || [])].filter(c => CARDS[c] && CARDS[c].w === 'pass' && p.cards.includes(c)).slice(0, 2);
     if (!a.own) G.usedQ.push(q);
     doPass(b, u, a.to, q, cards, !!a.own);
@@ -258,7 +257,7 @@ function handleAct(a) {
     if (G.phase === 'play' && b && !b.done && b.holder === u && p.cards.includes('nozokimi') && sealGate(b, u, 'nozokimi')) { rm(p, 'nozokimi'); G.peek[u] = { b: b.id, until: now() + 3000 }; }
   } else if (a.t === 'steal') useIdle(b, u, 'yokodori');
   else if (a.t === 'yogen') { if (useIdle(b, u, 'yogen', a.target)) note(u, `${nm(a.target)}で爆発すると予言しました。`); }
-  else if (a.t === 'oi') { if (!useIdle(b, u, 'oishitsumon', txt(a.q).slice(0, 80))) note(u, '追い質問を足せませんでした。'); }
+  else if (a.t === 'oi') { if (!useIdle(b, u, 'oishitsumon', txt(a.q).slice(0, 60))) note(u, '追い質問を足せませんでした。'); }
   else if (a.t === 'toushi') useIdle(b, u, 'toushi', a.target);
   else if (a.t === 'boom') useBoom(a.c, u);
 }
@@ -458,7 +457,7 @@ document.addEventListener('click', async e => {
     drafts = d || {};
     if (!G) return;
     for (const b of G.bombs) { if (b.done) continue; const x = drafts[b.holder];
-      if (x && x.b === b.id && x.h === b.hseq) { b.ans = String(x.ans || '').slice(0, 120); if (b.extra) b.extraAns = String(x.ex || '').slice(0, 120); } }
+      if (x && x.b === b.id && x.h === b.hseq) { b.ans = P(x.ans) && x.ans !== b.holder ? x.ans : ''; if (b.extra) b.extraAns = P(x.ex) && x.ex !== b.holder ? x.ex : ''; } }
   });
   net.onActions(handleAct);
   setInterval(loop, 200); loop();
