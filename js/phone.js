@@ -1,6 +1,7 @@
 // スマホ。テレビから届いた公開情報(S)と、自分だけの情報(V)で画面を組み立て、操作をテレビへ送る。
 import { esc, now, M, WHEN, CARDS, icon, AX, TYPES, tyIll, isWho, valid, strong, choices, pipsHTML } from './shared.js';
 import { createNet } from './net.js';
+import { buzz } from './sound.js';
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -59,7 +60,7 @@ function holdHTML(b) {
  <div class="blk"><p class="h"><span>答える</span><span>${qLabel(b)}</span></p><p class="qt">${esc(b.q)}</p>
  <textarea rows="3" maxlength="120" data-k="ans-${k}" data-f="ans" data-b="${id}" placeholder="5文字以上で答える"></textarea>${isWho(b.q) ? nameChips(id, 'ans') : ''}<p class="warn" data-w="ans-${k}"></p></div>
  <div data-sub="extra"></div>
- <div class="blk"><p class="h"><span>渡す相手</span><span>□は手札の枚数(開始時点)</span></p><div class="grid2">${opts.map(o => `<button class="opt ${ui['to-' + k] === o ? 'on' : ''}" data-act="to" data-b="${id}" data-v="${o}"><span>${esc(nm(o))}</span>${pipsHTML(P(o).pips || 0)}</button>`).join('')}</div></div>
+ <div class="blk"><p class="h"><span>渡す相手</span><span>右の印は手札の枚数(ラウンド開始時)</span></p><div class="grid2">${opts.map(o => `<button class="opt ${ui['to-' + k] === o ? 'on' : ''}" data-act="to" data-b="${id}" data-v="${o}"><span>${esc(nm(o))}</span>${pipsHTML(P(o).pips || 0)}</button>`).join('')}</div></div>
  <div class="blk"><p class="h"><span>その人への質問</span><span>選ぶか、自分で書く</span></p>${choiceList('qc-' + k, ui['qo-' + k], 'qc', id)}
  <div class="own" data-own="${k}" ${ui['qc-' + k] === 'own' ? '' : 'hidden'}><textarea rows="2" maxlength="80" data-k="nq-${k}" placeholder="5文字以上"></textarea><p class="warn" data-w="nq-${k}"></p></div></div>
  <div data-sub="pc"></div><p class="err" data-err="${id}"></p>
@@ -85,14 +86,17 @@ function holdSubs(s, b) {
 
 /* ---------- 持っていないとき ---------- */
 function idleTarget() { const l = live().filter(b => b.holder !== uid); if (!l.length) return null; return l.find(b => b.id === ui.ib) || l[0]; }
-const idleHTML = b => { const i = S.bombs.findIndex(x => x.id === b.id); return `<p class="st dg">${esc(nm(b.holder))}が<br>持っています</p><p class="mu">${S.bombs.length > 1 ? `爆弾${i + 1} ・ ` : ''}持っていない人のカードは、この爆弾であと${2 - b.idle}回</p>`; };
+const idleHTML = b => `<p class="st dg">${esc(nm(b.holder))}が<br>持っています</p><p class="mu">ほかの人のカード あと${2 - b.idle}回</p>`;
+const idleListHTML = l => `<div class="ibl">${l.map(b => `<p><span>爆弾${S.bombs.findIndex(x => x.id === b.id) + 1}</span><b>${esc(nm(b.holder))}</b>が持っています<em>カード あと${2 - b.idle}回</em></p>`).join('')}</div>`;
 function handHTML() {
   const cards = myCards(), tb = S.phase === 'play' ? idleTarget() : null, l = live().filter(b => b.holder !== uid);
   const sw = l.length > 1 ? `<span class="sw">${l.map(b => `<button class="${tb && tb.id === b.id ? 'on' : ''}" data-act="ib" data-v="${b.id}">爆弾${S.bombs.findIndex(x => x.id === b.id) + 1}</button>`).join('')}</span>` : '';
   if (!cards.length) return `<div class="hand"><div class="h"><span>手札</span></div><p class="empty">手札はありません。爆発するともらえます(最終ラウンドを除く)。</p></div>`;
   const others = S.players.filter(p => p.id !== uid);
   const act = c => {
-    if (CARDS[c].w !== 'idle') return `<p class="x">${c === 'migawari' || c === 'michizure' ? '爆発したときに画面に出ます。' : '爆弾を持っているときに使えます。'}</p>`;
+    const holding = live().some(b => b.holder === uid);
+    if (CARDS[c].w !== 'idle') return `<p class="x">${c === 'migawari' || c === 'michizure' ? '爆発したときに画面に出ます。' : holding ? '上の画面から使えます。' : '爆弾を持っているときに使えます。'}</p>`;
+    if (holding && l.length === 0) return `<p class="x">ほかの人が爆弾を持っているときに使えます。</p>`;
     if (!tb) return `<p class="x">ほかの人が爆弾を持っているときに使えます。</p>`;
     if (tb.idle >= 2) return `<p class="x">この爆弾では、もう使えません(2回まで)。</p>`;
     const id = tb.id;
@@ -118,7 +122,7 @@ function typeHTML() {
   const d = (S.diag || []).find(x => x.id === uid); if (!d) return `<p class="st dg">診断の対象外です</p>`;
   const T = TYPES[d.code];
   const ax = AX.map(a => `<div class="axr"><div class="axl"><span class="${d.code.includes(a.c[0]) ? 'on' : ''}">${a.l[0]}</span><span class="${d.code.includes(a.c[1]) ? 'on' : ''}">${a.l[1]}</span></div><div class="axb"><i style="left:${(d.code.includes(a.c[0]) ? 50 * (1 - d.pos[a.k]) : 50 + 50 * (1 - d.pos[a.k])).toFixed(0)}%"></i></div></div>`).join('');
-  return `<p class="mu" style="margin-top:24px">あなたのプレイスタイル</p><div class="tyh">${tyIll(d.code, 'ph')}<div><p class="tyc dg">${d.code}</p><p class="tyn dg">${T.n}</p></div></div><p class="tyq">${T.t}</p><div class="axs">${ax}</div><section class="tyx"><h4>こんな遊び方</h4><p>${T.d}</p><h4>強み</h4><p>${T.s}</p><h4>気をつけたいこと</h4><p>${T.w}</p><h4>相性</h4><div class="pair"><div>${tyIll(T.good, 'sm')}<p><span>よい</span>${TYPES[T.good].n}</p></div><div>${tyIll(T.bad, 'sm')}<p><span>手ごわい</span>${TYPES[T.bad].n}</p></div></div></section>
+  return `<p class="mu" style="margin-top:24px">あなたの遊び方</p><div class="tyh">${tyIll(d.code, 'ph')}<div><p class="tyc dg">${d.code}</p><p class="tyn dg">${T.n}</p></div></div><div class="axs">${ax}</div><section class="tyx"><h4>遊び方</h4><p>${T.d}</p><h4>強み</h4><p>${T.s}</p><h4>気をつけたいこと</h4><p>${T.w}</p><h4>相性</h4><div class="pair"><div>${tyIll(T.good, 'sm')}<p><span>よい</span>${TYPES[T.good].n}</p></div><div>${tyIll(T.bad, 'sm')}<p><span>手ごわい</span>${TYPES[T.bad].n}</p></div></div></section>
    <dl class="tys"><div><dt>1回に持っていた時間</dt><dd>平均 ${d.hold}秒</dd></div><div><dt>攻めのカード</dt><dd>${d.off}回</dd></div><div><dt>自分で書いた質問</dt><dd>${d.ownQ}回</dd></div><div><dt>いちばん多く渡した相手</dt><dd>${d.top ? esc(nm(d.top)) : 'なし'}</dd></div><div><dt>爆発</dt><dd>${d.boom}回</dd></div></dl>${d.few ? '<p class="mu">渡した回数が少ないため、参考程度の結果です。</p>' : ''}`;
 }
 function ctlHTML() {
@@ -126,7 +130,7 @@ function ctlHTML() {
   const b = (a, l, main) => `<button class="${main ? 'cg' : 'cs'}" data-host="${a}">${l}</button>`;
   return ({
     lobby: b('start', S.players.length < 3 ? '3人以上で開始できます' : 'はじめる', S.players.length >= 3),
-    play: b('abort', 'この爆弾を中止'),
+    play: `<button class="ab" data-abort>この爆弾を中止</button>`,
     reveal: b('next', '次へ', 1),
     score: b('round', S.round >= S.set.rounds ? '最終ラウンドへ' : '次のラウンドへ', 1),
     end: b('again', 'もう一度') + b('diag', '性格診断を見る', 1),
@@ -136,9 +140,9 @@ function ctlHTML() {
 function render() {
   if (!joined) return;
   const body = document.body;
-  if (closed || !S) { patch($('#pm'), 'closed', `<p class="st dg">部屋が閉じられました</p><p class="mu">テレビの画面が閉じられたか、通信が切れました。</p><p class="mu" style="margin-top:20px"><a href="phone.html${location.search}">参加画面に戻る</a></p>`); ['#pn', '#pc', '#pctl'].forEach(s => patch($(s), '', '')); return; }
+  if (closed || !S) { patch($('#pm'), 'closed', `<p class="st dg">部屋が閉じられました</p><p class="mu">テレビの画面が閉じられたか、通信が切れています。</p><p class="mu" style="margin-top:20px"><a href="phone.html${location.search}">参加画面に戻る</a></p>`); ['#pn', '#pc', '#pctl'].forEach(s => patch($(s), '', '')); return; }
   const me = P(uid), t = now();
-  const victim = S.phase === 'boom' && S.boom && S.boom.victim === uid; body.classList.toggle('red', victim);
+  const victim = S.phase === 'boom' && S.boom && S.boom.victim === uid; if (victim && !body.classList.contains('red')) buzz([300, 80, 300]); body.classList.toggle('red', victim);
   patch($('#sb'), JSON.stringify([me && me.name, S.round, S.final, S.room]), `<b>${esc(me ? me.name : '')}</b><span>部屋 ${esc(S.room)}${S.round ? ` ・ ${S.final ? '最終ラウンド' : `第${S.round}ラウンド`}` : ''}</span>`);
   // お知らせ
   if (V.note && V.note.id !== noteSeen) { noteSeen = V.note.id; noteShow = V.note.text; noteUntil = t + 5000; Object.keys(sending).forEach(k => delete sending[k]); }
@@ -149,12 +153,12 @@ function render() {
   if (!me && S.phase !== 'lobby') { patch(pm, 'out', `<p class="st dg">ゲーム中です</p><p class="mu">いまのゲームが終わって待合に戻ると、参加できます。</p>`); patch($('#pc'), '', ''); patch($('#pctl'), '', ''); return; }
   if (S.phase === 'play') {
     const l = live(), mk = 'play' + l.map(b => b.id + ':' + (b.holder === uid ? 'H' + b.hseq : 'I')).join(',');
-    if (pm.dataset.key !== mk && !composingIn(pm)) { pm.innerHTML = l.map(b => `<section data-sec="${b.id}"></section>`).join(''); pm.dataset.key = mk; }
-    for (const b of l) {
-      const s = pm.querySelector(`[data-sec="${b.id}"]`); if (!s) continue;
-      if (b.holder === uid) { patch(s, 'H' + hk(b), holdHTML(b)); holdSubs(s, b); }
-      else patch(s, 'I' + b.id + b.holder + b.idle, idleHTML(b));
-    }
+    const mine = l.filter(b => b.holder === uid), idle = l.filter(b => b.holder !== uid);
+    const mk2 = mk + (idle.length ? '|idle' : '');
+    if (pm.dataset.key !== mk2 && !composingIn(pm)) { pm.innerHTML = mine.map(b => `<section data-sec="${b.id}"></section>`).join('') + (idle.length ? '<section data-sec="idle"></section>' : ''); pm.dataset.key = mk2; }
+    for (const b of mine) { const s = pm.querySelector(`[data-sec="${b.id}"]`); if (!s) continue; if (patch(s, 'H' + hk(b), holdHTML(b))) buzz(180); holdSubs(s, b); }
+    const si = pm.querySelector('[data-sec="idle"]');
+    if (si) patch(si, 'I' + idle.map(b => b.id + b.holder + b.idle).join(','), S.bombs.length > 1 ? (mine.length ? '' : '<p class="st dg">最終ラウンド</p>') + idleListHTML(idle) : idleHTML(idle[0]));
   } else {
     let k = S.phase, h = '';
     if (S.phase === 'lobby') { k += JSON.stringify(S.players);
@@ -162,11 +166,11 @@ function render() {
     else if (S.phase === 'intro') h = `<p class="st dg">まもなく点火</p><p class="mu">テレビを見てください。</p>`;
     else if (S.phase === 'boom') {
       const B = S.boom; k += B.victim + B.stage + JSON.stringify(V.boomOpts);
-      if (victim) { const o = V.boomOpts || []; h = `<p class="st dg">あなたの手元で爆発</p><p class="cdn" data-live="boom">5</p><p class="mu" style="color:#fff">秒以内なら、最後の手段が使えます</p>${o.length ? `<div class="bo">${o.map(c => `<button data-act="boom" data-v="${c}"><span class="wi">${icon(c)}${CARDS[c].n}を使う</span></button><p>${CARDS[c].d}</p>`).join('')}</div>` : '<p class="mu" style="color:#fff;margin-top:20px">使えるカードはありません。</p>'}`; }
+      if (victim) { const o = V.boomOpts || []; h = `<p class="st dg">あなたの手元で爆発</p>${o.length ? `<p class="cdn" data-live="boom">5</p><p class="mu" style="color:#fff">秒以内なら、最後の手段が使えます</p><div class="bo">${o.map(c => `<button data-act="boom" data-v="${c}"><span class="wi">${icon(c)}${CARDS[c].n}を使う</span></button><p>${CARDS[c].d}</p>`).join('')}</div>` : '<p class="mu" style="color:#fff;margin-top:14px">使えるカードはありません。テレビを見てください。</p>'}`; }
       else h = `<p class="st dg">${esc(nm(B.victim))}の<br>手元で爆発</p><p class="mu">最後の手段を待っています。</p>`;
     } else if (S.phase === 'reveal') h = `<p class="st dg">暴露中</p><p class="mu">テレビを見てください。</p>`;
     else if (S.phase === 'type') { k += 't'; h = typeHTML(); }
-    else { const sc = (S.scores || {})[uid] || 0; k += sc; h = `<p class="mu" style="margin-top:24px">あなたの合計</p><p class="big">${sc < 0 ? M + (-sc) : sc}</p><p class="mu">${S.players.length}人中 ${rank()}位</p>`; }
+    else { const sc = (S.scores || {})[uid] || 0; k += sc; h = `<p class="mu" style="margin-top:24px">あなたの合計</p><p class="big">${sc < 0 ? M + (-sc) : sc}<small style="font-size:18px;margin-left:4px">点</small></p><p class="mu">${S.players.length}人中 ${rank()}位</p>`; }
     patch(pm, k, h);
     const bc = pm.querySelector('[data-live="boom"]'); if (bc && S.boom) bc.textContent = Math.max(0, S.boom.left - Math.floor((now() - pubAt) / 1000));
   }
@@ -191,7 +195,10 @@ document.addEventListener('input', e => {
   const el = e.target; if (!el.dataset || !el.dataset.k) return; ui[el.dataset.k] = el.value; warn(el);
   if (el.dataset.f && S) { const b = live().find(x => x.id === el.dataset.b); if (b && b.holder === uid) sendDraft(b); }
 });
+let abortArm = 0;
 document.addEventListener('click', e => {
+  const ab = e.target.closest('[data-abort]');
+  if (ab) { if (now() - abortArm < 3000) { send({ t: 'host', a: 'abort' }); abortArm = 0; ab.textContent = 'この爆弾を中止'; ab.classList.remove('armed'); } else { abortArm = now(); ab.textContent = 'もう一度押すと中止します'; ab.classList.add('armed'); setTimeout(() => { if (now() - abortArm >= 2900) { ab.textContent = 'この爆弾を中止'; ab.classList.remove('armed'); } }, 3000); } return; }
   const h = e.target.closest('[data-host]'); if (h) { send({ t: 'host', a: h.dataset.host }); h.disabled = true; setTimeout(() => { h.disabled = false; }, 1500); return; }
   const t = e.target.closest('[data-act]'); if (!t || !S) return;
   const act = t.dataset.act, b = (S.bombs || []).find(x => x.id === t.dataset.b), cards = myCards();

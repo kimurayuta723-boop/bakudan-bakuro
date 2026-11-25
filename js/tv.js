@@ -1,12 +1,14 @@
 // テレビ(進行役)。ゲームの状態はすべてこの画面が持ち、公開してよい情報だけを全員に、手札などは本人だけに配る。
 import { esc, rnd, pick, shuffle, now, M, WHEN, CARDS, Q, ST, icon, TVLINE, OFF, AX, TYPES, tyIll, valid, pipsHTML } from './shared.js';
 import { createNet, isLocal } from './net.js';
+import { createSound } from './sound.js';
+const SND = createSound();
 
 const $ = s => document.querySelector(s);
 let net, room = null, G = null;
 let lobby = {}, online = new Set(), drafts = {}, offSince = {};
 const set = { level: 2, extra: false, rounds: 5, short: false };
-let lastT = now(), actx = null, soundOn = true, nextTick = 0, lastPub = '', lastPriv = {}, hostKey = '', lobbyKey = '';
+let lastT = now(), lastPhase = '', cpus = [], nextTick = 0, lastPub = '', lastPriv = {}, hostKey = '', lobbyKey = '';
 
 /* ---------- 共通 ---------- */
 const P = id => G.players.find(p => p.id === id);
@@ -19,11 +21,13 @@ const SX = id => G.stats[id];
 const rm = (p, c) => { const i = p.cards.indexOf(c); if (i >= 0) { p.cards.splice(i, 1); const s = G.stats[p.id]; s.cards[c] = (s.cards[c] || 0) + 1; } };
 const log = t => { G.log.unshift(t); G.log.length = Math.min(G.log.length, 6); };
 const note = (u, text) => { G.notes[u] = { id: ++G.nid, text }; };
-const flash = (c, who) => { G.flash = { c, who, until: now() + 2800 }; };
+const flash = (c, who) => { G.flash = { c, who, until: now() + 2800 }; SND.card(); };
 const snapPips = () => { G.pips = {}; G.players.forEach(p => G.pips[p.id] = p.cards.length); };
-const lobbyList = () => Object.entries(lobby).map(([id, v]) => ({ id, name: String(v.name || '').slice(0, 8), t: v.t || 0 })).sort((a, b) => a.t - b.t);
+const lobbyList = () => Object.entries(lobby).map(([id, v]) => ({ id, name: String(v.name || '').slice(0, 8), t: v.t || 0 })).sort((a, b) => a.t - b.t).concat(cpus.map(c => ({ ...c, bot: true })));
 const phase = () => G ? G.phase : 'lobby';
-function ctrlId() { const list = G ? G.players : lobbyList(); const on = list.find(p => online.has(p.id)); return on ? on.id : (list[0] ? list[0].id : null); }
+const isCpu = id => String(id).startsWith('cpu');
+const isOn = id => isCpu(id) || online.has(id);
+function ctrlId() { const list = (G ? G.players : lobbyList()).filter(p => !isCpu(p.id)); const on = list.find(p => online.has(p.id)); return on ? on.id : (list[0] ? list[0].id : null); }
 
 function qPoolG(not) { let pool = []; for (let l = 1; l <= G.set.level; l++) pool = pool.concat(Q[l].map(t => ({ t, l }))); return pool.filter(x => x.t !== not); }
 function randQ(not) {
@@ -35,17 +39,16 @@ function randQ(not) {
 function startGame() {
   const list = lobbyList();
   if (list.length < 3) return false;
-  G = { set: { ...set }, players: list.map(p => ({ id: p.id, name: p.name, score: 0, cards: [] })),
+  G = { set: { ...set }, players: list.map(p => ({ id: p.id, name: p.name, score: 0, cards: [], bot: !!p.bot })),
     round: 0, final: false, bombs: [], phase: 'intro', log: [], history: [], boom: null, reveal: null,
     notes: {}, nid: 0, seen: {}, peek: {}, usedQ: [], pips: {}, seq: 0, flash: null, diag: null };
   G.players.forEach(deal); newStats();
-  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; }
   nextRound(); return true;
 }
 function newStats() { G.stats = {}; G.players.forEach(p => G.stats[p.id] = { holds: [], to: {}, ownQ: 0, cards: {}, boom: 0, passes: 0 }); }
 function nextRound() {
-  G.round++; G.final = G.round > G.set.rounds; G.bombs = []; G.log = []; G.reveal = null; G.peek = {};
-  const on = G.players.filter(p => online.has(p.id)).map(p => p.id);
+  G.round++; G.flash = null; G.final = G.round > G.set.rounds; G.bombs = []; G.log = []; G.reveal = null; G.peek = {};
+  const on = G.players.filter(p => isOn(p.id)).map(p => p.id);
   const order = shuffle(on.length >= 2 ? on : G.players.map(p => p.id));
   for (let i = 0; i < (G.final ? 2 : 1); i++) G.bombs.push(newBomb(order[i % order.length]));
   snapPips(); G.phase = 'intro'; G.introUntil = now() + 3000;
@@ -57,7 +60,7 @@ function newBomb(h) {
 }
 function passTargets(b, from) {
   const others = G.players.filter(p => p.id !== from);
-  const pool = others.filter(p => online.has(p.id)).length ? others.filter(p => online.has(p.id)) : others;
+  const pool = others.filter(p => isOn(p.id)).length ? others.filter(p => isOn(p.id)) : others;
   let c = pool.filter(p => p.id !== b.lastPasser && (b.recv[p.id] || 0) < 2);
   if (!c.length) c = pool.filter(p => p.id !== b.lastPasser);
   if (!c.length) c = pool;
@@ -80,7 +83,7 @@ function doPass(b, from, to, q, cards, own) {
   const st = SX(from); st.passes++; st.to[to] = (st.to[to] || 0) + 1; if (own) st.ownQ++;
   const eff = cards.filter(c => sealGate(b, from, c));
   confirmHold(b); saveAns(b);
-  const p = P(from); handTo(b, to, q, from); log(`${nm(from)} → ${nm(to)}`);
+  const p = P(from); handTo(b, to, q, from); SND.pass();
   for (const c of eff) {
     if (!p.cards.includes(c)) continue; rm(p, c);
     if (c === 'tenka') { const cut = G.set.short ? 8000 : 15000; b.fuse = Math.max(2000, cut - b.age, b.fuse - cut); }
@@ -90,7 +93,7 @@ function doPass(b, from, to, q, cards, own) {
 }
 function doReturn(b, uid) {
   if (!b.lastPasser) return; rm(P(uid), 'uchikaeshi');
-  const back = b.lastPasser, q = b.q; confirmHold(b); handTo(b, back, q, uid); log(`${nm(uid)}が打ち返しを使った`); flash('uchikaeshi', uid);
+  const back = b.lastPasser, q = b.q; confirmHold(b); handTo(b, back, q, uid); SND.pass(); log(`${nm(uid)}が打ち返しを使った`); flash('uchikaeshi', uid);
 }
 function useIdle(b, uid, c, arg) {
   const p = P(uid);
@@ -103,13 +106,13 @@ function useIdle(b, uid, c, arg) {
 }
 function autoPass(b) {
   const from = b.holder, opts = passTargets(b, from); if (!opts.length) return;
-  const to = pick(opts); confirmHold(b); saveAns(b); handTo(b, to, randQ(b.q), from);
+  const to = pick(opts); confirmHold(b); saveAns(b); handTo(b, to, randQ(b.q), from); SND.pass();
   log(`${nm(from)}の通信が切れたため、${nm(to)}へ移動`);
 }
 function explode(b) {
   G.phase = 'boom';
   G.boom = { b, victim: b.holder, cause: b.lastPasser, causer: b.lastPasser, stage: 1, drag: null, sub: null, left: 5000 };
-  beep(70, .6, .3);
+  SND.boom(G.final ? 1.15 : 1); scheduleBot();
 }
 function boomOptions() {
   const B = G.boom, p = P(B.victim), o = []; if (!B.cause) return o;
@@ -121,7 +124,7 @@ function useBoom(c, uid) {
   if (B.stage === 1 && !sealGate(B.b, uid, c)) return;
   rm(P(uid), c);
   if (c === 'migawari') { log(`${nm(uid)}が身代わりを使った`); flash('migawari', uid); if (B.b.holder === uid) confirmHold(B.b);
-    B.sub = uid; B.victim = B.cause; B.cause = uid; B.causer = uid; B.stage = 2; B.left = 5000; }
+    B.sub = uid; B.victim = B.cause; B.cause = uid; B.causer = uid; B.stage = 2; B.left = 5000; scheduleBot(); }
   if (c === 'michizure') { log(`${nm(uid)}が道連れを使った`); flash('michizure', uid); B.drag = B.cause; B.left = Math.min(B.left, 1500); }
 }
 function resolveBoom() {
@@ -166,11 +169,62 @@ function diagnose() {
   });
 }
 
+
+/* ---------- CPU ---------- */
+const CPU_WHO = ['{n}かな。理由は内緒', '迷うけど{n}', '{n}だと思う', '正直に言うと{n}', '{n}。前から思っていた', '{n}。本人も分かっているはず'];
+const CPU_FREE = ['{n}の遅刻ぐせが気になる', '{n}の店選びはいつも駅から遠い', '{n}の話はたまに長い', '{n}の返信が遅いのが気になる'];
+function cpuAnswer(q, self) { const n = pick(G.players.filter(p => p.id !== self)).name; return pick(/誰|のは/.test(q) ? CPU_WHO : CPU_FREE).replace('{n}', n); }
+function botHolder(b) {
+  const p = P(b.holder);
+  if (!b.plan || b.plan.h !== b.hseq) {
+    const typ = rnd(5, 13) * 1000 * (G.set.short ? .7 : 1);
+    b.plan = { h: b.hseq, typ, passAt: typ + rnd(1, 6) * 1000, full: cpuAnswer(b.q, p.id),
+      retAt: b.lastPasser && p.cards.includes('uchikaeshi') && Math.random() < .35 ? rnd(1500, 4000) : null,
+      peekAt: p.cards.includes('nozokimi') && Math.random() < .3 ? rnd(2000, 5000) : null };
+  }
+  const pl = b.plan;
+  b.ans = pl.full.slice(0, Math.floor(pl.full.length * Math.min(1, b.heldMs / pl.typ)));
+  if (b.extra) {
+    if (!pl.ex) { pl.ex = cpuAnswer(b.extra.text, p.id); pl.exAt = b.heldMs; pl.passAt = Math.max(pl.passAt, b.heldMs + rnd(4, 8) * 1000); }
+    b.extraAns = pl.ex.slice(0, Math.floor(pl.ex.length * Math.min(1, (b.heldMs - pl.exAt) / 4000)));
+  }
+  if (pl.retAt != null && b.heldMs >= pl.retAt) { pl.retAt = null; if (p.cards.includes('uchikaeshi') && sealGate(b, p.id, 'uchikaeshi')) { doReturn(b, p.id); return; } }
+  if (pl.peekAt != null && b.heldMs >= pl.peekAt) { pl.peekAt = null; if (p.cards.includes('nozokimi') && sealGate(b, p.id, 'nozokimi')) rm(p, 'nozokimi'); }
+  if (b.heldMs >= pl.passAt) {
+    const opts = passTargets(b, p.id), cards = [];
+    if (!b.seal) {
+      if (p.cards.includes('tenka') && Math.random() < .5) cards.push('tenka');
+      if (p.cards.includes('fuuin') && (cards.length || Math.random() < .3)) cards.push('fuuin');
+      else if (p.cards.includes('nisefuuin') && Math.random() < .4) cards.push('nisefuuin');
+    }
+    let to = pick(opts);
+    if (cards.includes('tenka')) { const weak = opts.filter(id => (G.pips[id] || 0) === 0); if (weak.length) to = pick(weak); }
+    doPass(b, p.id, to, randQ(b.q), cards, Math.random() < .25);
+  }
+}
+function botIdle(dt) {
+  for (const p of G.players) {
+    if (!p.bot || Math.random() > .05 * dt / 1000) continue;
+    const bs = G.bombs.filter(b => !b.done && b.holder !== p.id && b.idle < 2); if (!bs.length) continue;
+    const b = pick(bs), own = p.cards.filter(c => CARDS[c].w === 'idle'); if (!own.length) continue;
+    const c = pick(own);
+    if (c === 'yokodori' && b.heldMs > 8000) continue;
+    const others = G.players.filter(x => x.id !== b.holder && x.id !== p.id); if (!others.length) continue;
+    useIdle(b, p.id, c, c === 'oishitsumon' ? randQ(b.q) : pick(others).id);
+  }
+}
+function scheduleBot() { const B = G.boom; B.botAt = P(B.victim).bot ? rnd(2600, 4200) : null; }
+function botBoom() {
+  const B = G.boom; const o = boomOptions(); if (!o.length) return;
+  if (B.stage === 1 && B.b.seal) return;
+  useBoom(o.includes('migawari') ? 'migawari' : 'michizure', B.victim);
+}
+
 /* ---------- 進行の指示(テレビのボタン、または幹事のスマホから) ---------- */
 function hostCmd(a) {
   const ph = phase();
   if (a === 'start' && ph === 'lobby') { if (!startGame()) flashLobby('3人以上で始められます。'); }
-  else if (a === 'abort' && ph === 'play') { G.bombs.forEach(b => { b.done = true; b.heldMs = 0; net.clearDraft(b.holder); }); G.boom = null; log('ホストが中止しました'); G.phase = G.final ? 'end' : 'score'; }
+  else if (a === 'abort' && ph === 'play') { G.bombs.forEach(b => { b.done = true; b.heldMs = 0; net.clearDraft(b.holder); }); G.boom = null; log('この爆弾は中止しました'); G.phase = G.final ? 'end' : 'score'; }
   else if (a === 'next' && ph === 'reveal') { G.reveal = null; snapPips(); G.phase = G.bombs.some(b => !b.done) ? 'play' : (G.final ? 'end' : 'score'); }
   else if (a === 'round' && ph === 'score') nextRound();
   else if (a === 'diag' && ph === 'end') { G.diag = diagnose(); G.phase = 'type'; }
@@ -212,9 +266,9 @@ function handleAct(a) {
 function buildPub() {
   const ph = phase();
   const base = { phase: ph, room, ctrl: ctrlId(), set: { ...set } };
-  if (!G) return { ...base, players: lobbyList().map(p => ({ id: p.id, name: p.name, on: online.has(p.id) })) };
+  if (!G) return { ...base, players: lobbyList().map(p => ({ id: p.id, name: p.name, on: isOn(p.id), cpu: !!p.bot })) };
   return { ...base, set: { ...G.set }, round: G.round, final: G.final,
-    players: G.players.map(p => ({ id: p.id, name: p.name, pips: G.pips[p.id] || 0, on: online.has(p.id) })),
+    players: G.players.map(p => ({ id: p.id, name: p.name, pips: G.pips[p.id] || 0, on: isOn(p.id), cpu: !!p.bot })),
     bombs: G.bombs.map(b => ({ id: b.id, holder: b.holder, hseq: b.hseq, q: b.q, qBy: b.qBy || null, extra: b.extra || null, seal: !!b.seal, idle: b.idle,
       hs: Math.floor(b.heldMs / 1000), lp: b.lastPasser || null, recv: b.recv, done: b.done })),
     boom: G.boom ? { victim: G.boom.victim, stage: G.boom.stage, left: Math.ceil(G.boom.left / 1000) } : null,
@@ -236,13 +290,13 @@ function publish() {
   if (pub !== lastPub) { lastPub = pub; net.setPub(JSON.parse(pub)); }
   if (!G) return;
   for (const p of G.players) {
+    if (p.bot) continue;
     const v = JSON.stringify(buildPriv(p));
     if (v !== lastPriv[p.id]) { lastPriv[p.id] = v; net.setPriv(p.id, JSON.parse(v)); }
   }
 }
 
 /* ---------- 音(残り時間とは無関係に揺らす) ---------- */
-function beep(f, len, vol) { if (!actx || !soundOn) return; try { const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = f; g.gain.value = vol; o.connect(g); g.connect(actx.destination); o.start(); g.gain.exponentialRampToValueAtTime(.0001, actx.currentTime + len); o.stop(actx.currentTime + len); } catch (e) { } }
 
 /* ---------- ループ ---------- */
 function loop() {
@@ -254,13 +308,15 @@ function loop() {
         if (b.done) continue;
         b.fuse -= dt; b.age += dt; b.heldMs += dt; b.fakeP += (.9 - b.fakeP) * rnd(0, .014) * (dt / 200);
         if (b.fuse <= 0) { explode(b); break; }
+        if (P(b.holder).bot) botHolder(b);
         // 持っている人の通信が15秒切れたら、別の人へ移す
-        if (!online.has(b.holder)) { offSince[b.holder] = offSince[b.holder] || t; if (t - offSince[b.holder] > 15000) { autoPass(b); delete offSince[b.holder]; } }
+        if (!isOn(b.holder)) { offSince[b.holder] = offSince[b.holder] || t; if (t - offSince[b.holder] > 15000) { autoPass(b); delete offSince[b.holder]; } }
         else delete offSince[b.holder];
       }
-      if (G.phase === 'play' && t >= nextTick) { beep(1700, .03, .05); nextTick = t + rnd(260, 950); }
+      if (G.phase === 'play') { botIdle(dt); if (t >= nextTick) { SND.sizzle(); nextTick = t + (Math.random() < .2 ? rnd(25, 70) : rnd(90, 420)); } }
     }
-    if (G.phase === 'boom') { G.boom.left -= dt; if (G.boom.left <= 0) resolveBoom(); }
+    if (G.phase === 'boom') { const B = G.boom; B.left -= dt; if (B.botAt != null && B.left <= B.botAt) { B.botAt = null; botBoom(); } if (G.boom && G.boom.left <= 0) resolveBoom(); }
+    if (G && G.phase !== lastPhase) { const ph = G.phase; if (ph === 'intro') SND.ignite(); if (ph === 'reveal') SND.reveal(); if (ph === 'end') SND.fanfare(); lastPhase = ph; }
   }
   render(); publish();
 }
@@ -283,11 +339,11 @@ const qLabel = b => b.qBy ? `${esc(nm(b.qBy))}からの質問` : 'お題';
 const curQ = b => b.extra ? b.extra.text : b.q;
 function roster() {
   const hs = G.bombs.filter(b => !b.done).map(b => b.holder);
-  return `<div class="roster">${G.players.map(p => `<span class="${hs.includes(p.id) ? 'on' : ''} ${online.has(p.id) ? '' : 'off'}">${esc(p.name)}${pipsHTML(G.pips[p.id] || 0)}</span>`).join('')}</div>`;
+  return `<div class="roster">${G.players.map(p => `<span class="${hs.includes(p.id) ? 'on' : ''} ${isOn(p.id) ? '' : 'off'}">${esc(p.name)}${pipsHTML(G.pips[p.id] || 0)}</span>`).join('')}</div>`;
 }
 function table(one) {
   const s = G.players.slice().sort((a, b) => b.score - a.score);
-  return `<div class="tbl ${one || s.length <= 5 ? 'one' : ''}">${s.map((p, i) => `<div class="tr"><span class="r">${i + 1}</span><span>${esc(p.name)}</span><span class="dg">${p.score < 0 ? M + (-p.score) : p.score}</span></div>`).join('')}</div>`;
+  return `<div class="tbl ${one || s.length <= 5 ? 'one' : ''}">${s.map((p, i) => `<div class="tr"><span class="r">${i + 1}</span><span>${esc(p.name)}</span><span class="num">${p.score < 0 ? M + (-p.score) : p.score}</span></div>`).join('')}</div>`;
 }
 function flashHTML() {
   const f = G.flash; if (!f || now() >= f.until) return '';
@@ -303,19 +359,19 @@ let lobbyMsg = '', lobbyMsgUntil = 0;
 function flashLobby(t) { lobbyMsg = t; lobbyMsgUntil = now() + 4000; }
 function renderLobby(el) {
   const list = lobbyList();
-  const key = JSON.stringify([room, list, [...online], set, lobbyMsg && now() < lobbyMsgUntil ? lobbyMsg : '']);
+  const key = JSON.stringify([room, list, [...online], set, lobbyMsg && now() < lobbyMsgUntil ? lobbyMsg : '', SND.unlocked]);
   if (key === lobbyKey && el.querySelector('.lobby')) return; lobbyKey = key;
   const keepQR = el.querySelector('#qr');
   const seg = (k, opts) => `<div class="tseg">${opts.map(([v, l]) => `<button data-s="${k}" data-v="${v}" class="${String(set[k]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
   const html = `<div class="lobby">
    <div class="lb-l"><p class="k">スマホで参加</p><h1 class="dg">ばくだん暴露</h1><div class="qrw"><div id="qrslot"></div><div><p class="k">部屋コード</p><p class="code dg">${esc(room || '----')}</p><p class="url">${esc(joinURL())}</p></div></div></div>
    <div class="lb-r"><p class="k">参加者 ${list.length}人${list.length < 3 ? '(3人以上で開始)' : ''}</p>
-    <div class="pl">${list.length ? list.map((p, i) => `<span class="${online.has(p.id) ? '' : 'off'}">${p.id === ctrlId() ? '<i class="ctrl">幹事</i>' : ''}${esc(p.name)}<button data-kick="${p.id}" aria-label="${esc(p.name)}を外す">×</button></span>`).join('') : '<em>まだ誰もいません</em>'}</div>
+    <div class="pl">${list.length ? list.map((p, i) => `<span class="${isOn(p.id) ? '' : 'off'} ${p.bot ? 'cpu' : ''}">${p.id === ctrlId() ? '<i class="ctrl">幹事</i>' : ''}${esc(p.name)}<button data-kick="${p.id}" aria-label="${esc(p.name)}を外す">×</button></span>`).join('') : '<em>まだ誰もいません</em>'}${list.length < 11 ? '<button class="addcpu" data-cpu="add">+ CPUを追加</button>' : ''}</div>
     <div class="sets"><p class="k">過激度</p>${seg('level', [[1, '1 ゆるめ'], [2, '2 ふつう'], [3, '3 きわどい']])}
     <p class="k">カード</p>${seg('extra', [[false, '基本 7種'], [true, '基本+追加 11種']])}
     <p class="k">ラウンド数</p>${seg('rounds', [[3, '3+最終'], [5, '5+最終'], [7, '7+最終']])}
     <p class="k">導火線</p>${seg('short', [[false, '本番 40〜120秒'], [true, '短め 20〜50秒']])}</div>
-    <p class="lmsg">${lobbyMsg && now() < lobbyMsgUntil ? esc(lobbyMsg) : '幹事のスマホ、またはこの画面の「はじめる」で開始します。'}</p>
+    <p class="lmsg">${lobbyMsg && now() < lobbyMsgUntil ? esc(lobbyMsg) : (SND.unlocked ? '幹事のスマホ、またはこの画面の「はじめる」で開始します。' : '効果音を出すには、この画面を一度クリックしてください。')}</p>
     <button class="tgo" data-h="start" ${list.length < 3 ? 'disabled' : ''}>はじめる</button></div></div>`;
   el.innerHTML = html;
   const slot = el.querySelector('#qrslot');
@@ -326,7 +382,8 @@ function render() {
   const tv = $('#tv'), el = tv.querySelector('.in'); let h = '';
   tv.classList.toggle('red', phase() === 'boom');
   if (!G) { renderLobby(el); renderHost(); return; }
-  const meta = `<div class="meta"><span>${G.final ? '最終ラウンド ・ 爆弾2個 ・ 点数2倍' : `第${G.round}ラウンド / 全${G.set.rounds}+最終`}</span><span>${esc(G.log[0] || '')}</span></div>`;
+  const rlabel = G.final ? '最終ラウンド ・ 爆弾2個 ・ 点数2倍' : `第${G.round}ラウンド / 全${G.set.rounds}+最終`;
+  const meta = `<div class="meta"><span>${rlabel}</span><span>${G.phase === 'play' ? esc(G.log[0] || '') : ''}</span></div>`;
   if (G.phase === 'intro') {
     h = `${introSVG(G.final ? 2 : 1)}<div class="center"><span class="k">${G.final ? '爆弾2個 ・ 点数2倍' : 'まもなく点火'}</span><span class="h dg">${G.final ? '最終ラウンド' : `第${G.round}ラウンド`}</span></div>`;
   } else if (G.phase === 'play') {
@@ -343,22 +400,22 @@ function render() {
     const R = G.reveal;
     h = meta + `<div class="rv ${R.entries.length > 1 ? 'two' : ''}">${R.entries.map(e => `<div><div><div class="nm dg">${esc(nm(e.pid))}</div><div class="tg">${e.tag ? esc(e.tag) : 'の答え'}</div><div class="rq">${e.none ? '' : esc(e.q)}</div></div><div><div class="ra ${e.none || !(e.a && e.a.trim()) ? 'none' : ''}">${e.none ? 'この爆弾では答えていません' : (e.a && e.a.trim() ? esc(e.a) : '答えられなかった')}</div><div class="pt">${e.pts.map(esc).join(' / ')}</div></div></div>`).join('')}</div>` + (R.others.length ? `<div class="foot">${R.others.map(x => `<b>${esc(x)}</b>`).join('  ・  ')}</div>` : '');
   } else if (G.phase === 'score') {
-    h = meta + `<div class="ttl dg">第${G.round}ラウンド終了</div>${table()}`;
+    h = `<div class="meta"><span>途中経過</span><span>全${G.set.rounds}ラウンド+最終ラウンド</span></div><div class="ttl dg">第${G.round}ラウンド終了</div>${table()}`;
   } else if (G.phase === 'end') {
     const top = G.players.slice().sort((a, b) => b.score - a.score)[0], sum = G.history.slice(-6).reverse();
-    h = `<div class="meta"><span>結果</span><span>質問と答えはどこにも保存していません</span></div><div class="ends"><div><div class="ttl dg" style="margin-top:0">${esc(top.name)}の勝ち</div>${table(1)}</div><div class="sum"><h3>今日の暴露</h3>${sum.length ? sum.map(s => `<p><b>${esc(s.name)}</b>${esc(s.q)}<span>${s.a && s.a.trim() ? esc(s.a) : '答えられなかった'}</span></p>`).join('') : '<p>今日は誰も暴露されませんでした。</p>'}</div></div>`;
+    h = `<div class="meta"><span>結果</span><span>質問と答えは、部屋を閉じると消えます</span></div><div class="ends"><div><div class="ttl dg" style="margin-top:0">${esc(top.name)}の勝ち</div>${table(1)}</div><div class="sum"><h3>今日の暴露</h3>${sum.length ? sum.map(s => `<p><b>${esc(s.name)}</b>${esc(s.q)}<span>${s.a && s.a.trim() ? esc(s.a) : '答えられなかった'}</span></p>`).join('') : '<p>今日は誰も暴露されませんでした。</p>'}</div></div>`;
   } else if (G.phase === 'type') {
     const D = G.diag;
-    h = `<div class="meta"><span>今日のプレイスタイル</span><span>爆弾の持ち方 ・ カードの使い方 ・ 渡し方から判定</span></div><div class="tyg ${D.length > 6 ? 'many' : ''}">${D.map(d => `<div>${tyIll(d.code, 'tvi')}<div><p class="tn">${esc(nm(d.id))}</p><p class="tc dg">${d.code}</p><p class="tt">${TYPES[d.code].n}</p><p class="tl">${TYPES[d.code].t}</p></div></div>`).join('')}</div>`;
+    h = `<div class="meta"><span>今日の遊び方</span><span>爆弾の持ち方 ・ カードの使い方 ・ 渡し方から判定</span></div><div class="tyg ${D.length > 6 ? 'many' : ''}">${D.map(d => `<div>${tyIll(d.code, 'tvi')}<div><p class="tn">${esc(nm(d.id))}</p><p class="tc dg">${d.code}</p><p class="tt">${TYPES[d.code].n}</p><p class="tl">${TYPES[d.code].t}</p></div></div>`).join('')}</div>`;
   }
   el.innerHTML = h; renderHost();
 }
 function renderHost() {
-  const ph = phase(), k = ph + '|' + soundOn + '|' + (G ? G.round : 0) + '|' + room; if (k === hostKey) return; hostKey = k;
-  const snd = `<button data-h="sound">音 ${soundOn ? 'オン' : 'オフ'}</button>`;
+  const ph = phase(), k = ph + '|' + SND.on + '|' + SND.unlocked + '|' + (G ? G.round : 0) + '|' + room; if (k === hostKey) return; hostKey = k;
+  const snd = `<button data-h="sound">${!SND.unlocked ? '音を出す' : SND.on ? '音 オン' : '音 オフ'}</button>`;
   const full = `<button data-h="full">全画面</button>`;
   const m = {
-    lobby: `${full}<button data-h="close">部屋を閉じる</button>`,
+    lobby: `${snd}${full}<button data-h="close">部屋を閉じる</button>`,
     play: `<button data-h="abort">この爆弾を中止</button>${snd}${full}`, intro: snd + full, boom: snd + full,
     reveal: `<button class="main" data-h="next">次へ</button>${full}`,
     score: `<button class="main" data-h="round">${G && G.round >= G.set.rounds ? '最終ラウンドへ' : '次のラウンドへ'}</button>${full}`,
@@ -370,14 +427,16 @@ function renderHost() {
 
 /* ---------- 起動 ---------- */
 document.addEventListener('click', async e => {
+  SND.init(); hostKey = '';
+  const cp = e.target.closest('[data-cpu]');
+  if (cp && !G) { if (lobbyList().length < 11) { let n = 1; while (cpus.some(c => c.id === 'cpu' + n)) n++; cpus.push({ id: 'cpu' + n, name: 'CPU' + n, t: 1e15 + n }); } lobbyKey = ''; return; }
   const s = e.target.closest('[data-s]');
   if (s && !G) { const k = s.dataset.s, v = s.dataset.v; set[k] = k === 'level' || k === 'rounds' ? +v : v === 'true'; lobbyKey = ''; return; }
   const kick = e.target.closest('[data-kick]');
-  if (kick && !G) { delete lobby[kick.dataset.kick]; net.removePlayer(kick.dataset.kick); lobbyKey = ''; return; }
+  if (kick && !G) { const id = kick.dataset.kick; if (isCpu(id)) cpus = cpus.filter(c => c.id !== id); else { delete lobby[id]; net.removePlayer(id); } lobbyKey = ''; return; }
   const h = e.target.closest('[data-h]'); if (!h) return;
   const a = h.dataset.h;
-  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); } catch (x) { }
-  if (a === 'sound') { soundOn = !soundOn; hostKey = ''; return; }
+  if (a === 'sound') { if (!SND.unlocked) SND.init(); else SND.on = !SND.on; hostKey = ''; return; }
   if (a === 'full') { try { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); } catch (x) { } return; }
   if (a === 'close') { await net.closeRoom(); location.href = 'index.html'; return; }
   hostCmd(a); loop();
