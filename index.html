@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ばくだん暴露</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main class="entry">
+  <h1 class="dg">ばくだん暴露</h1>
+  <p class="lead">爆弾を回しながら、渡す相手に質問を押しつけます。爆発したとき持っていた人の答えだけが、名前付きでテレビに映ります。</p>
+  <nav class="doors">
+    <a href="tv.html" id="tvlink"><b>テレビで部屋を作る</b><span>テレビにつないだパソコンで開きます。部屋コードとQRコードが表示されます。</span></a>
+    <a href="phone.html" id="phlink"><b>スマホで参加する</b><span>テレビに出ているQRコードを読むか、部屋コードを入れて参加します。</span></a>
+  </nav>
+</main>
+<script>
+if(new URLSearchParams(location.search).has('local')){document.getElementById('tvlink').href='tv.html?local';document.getElementById('phlink').href='phone.html?local';}
+</script>
+</body>
+</html>
