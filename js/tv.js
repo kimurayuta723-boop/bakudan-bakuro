@@ -3,6 +3,7 @@ import { esc, rnd, pick, shuffle, now, M, WHEN, CARDS, Q, ST, icon, TVLINE, OFF,
 import { createNet, isLocal } from './net.js';
 import { createSound } from './sound.js';
 const SND = createSound();
+const SOLO = window.BK_SOLO || null; // スマホだけで試すモード(solo.html)
 
 const $ = s => document.querySelector(s);
 let net, room = null, G = null;
@@ -230,7 +231,7 @@ function hostCmd(a) {
   else if (a === 'diag' && ph === 'end') { G.diag = diagnose(); G.phase = 'type'; }
   else if (a === 'back' && ph === 'type') G.phase = 'end';
   else if (a === 'again' && (ph === 'end' || ph === 'type')) { G.players.forEach(p => { p.score = 0; p.cards = []; deal(p); }); G.round = 0; G.history = []; G.diag = null; newStats(); nextRound(); }
-  else if (a === 'lobby' && (ph === 'end' || ph === 'type')) { G = null; }
+  else if (a === 'lobby' && (ph === 'end' || ph === 'type')) { if (SOLO) { location.href = 'solo.html'; return; } G = null; }
   hostKey = ''; lobbyKey = '';
 }
 function handleAct(a) {
@@ -301,6 +302,7 @@ function publish() {
 /* ---------- ループ ---------- */
 function loop() {
   const t = now(), dt = Math.min(500, t - lastT); lastT = t;
+  if (SOLO && !G && room && lobbyList().some(p => !p.bot)) startGame();
   if (G) {
     if (G.phase === 'intro' && t >= G.introUntil) G.phase = 'play';
     if (G.phase === 'play') {
@@ -381,6 +383,8 @@ function renderLobby(el) {
 function render() {
   const tv = $('#tv'), el = tv.querySelector('.in'); let h = '';
   tv.classList.toggle('red', phase() === 'boom');
+  tv.dataset.ph = phase();
+  if (!G && SOLO) { el.innerHTML = '<div class="center"><span class="k">準備しています</span></div>'; return; }
   if (!G) { renderLobby(el); renderHost(); return; }
   const rlabel = G.final ? '最終ラウンド ・ 爆弾2個 ・ 点数2倍' : `第${G.round}ラウンド / 全${G.set.rounds}+最終`;
   const meta = `<div class="meta"><span>${rlabel}</span><span>${G.phase === 'play' ? esc(G.log[0] || '') : ''}</span></div>`;
@@ -446,6 +450,8 @@ document.addEventListener('click', async e => {
   catch (e) { $('#tv .in').innerHTML = `<div class="center"><span class="k">接続できませんでした</span><span class="h dg" style="font-size:4cqw">Firebaseの設定を確かめてください</span><span class="k">${esc(e.message || e)}</span></div>`; return; }
   if (net.mode === 'local') document.body.classList.add('local');
   room = await net.createRoom();
+  window.BK_ROOM = room;
+  if (SOLO) { Object.assign(set, SOLO.set); for (let n = 1; n <= SOLO.cpus; n++) cpus.push({ id: 'cpu' + n, name: 'CPU' + n, t: 1e15 + n }); }
   net.onPlayers(v => { lobby = v || {}; lobbyKey = ''; });
   net.onOnline(list => { online = new Set(list); });
   net.onDrafts(d => {

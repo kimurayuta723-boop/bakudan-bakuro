@@ -13,12 +13,17 @@
 | `index.html` | 入口(テレビで部屋を作る/スマホで参加する) |
 | `tv.html` + `js/tv.js` | テレビ画面。ゲームの進行役で、状態はすべてここで持ちます |
 | `phone.html` + `js/phone.js` | スマホ画面 |
+| `solo.html` | スマホだけで試すページ(1台でCPUと対戦。通信は使わない) |
 | `js/shared.js` | カード・質問・絵柄・性格診断など、両方で使うデータ |
 | `js/net.js` | 通信部分(Firebase/試験モード) |
 | `js/sound.js` | 効果音(音源ファイルを使わず、その場で合成) |
 | `js/config.js` | Firebase の設定値を書くファイル |
 | `database.rules.json` | Realtime Database のセキュリティルール |
 | `css/style.css` | 見た目 |
+
+## スマホだけで試す
+
+入口の「スマホだけで試す」(`solo.html`)を開くと、テレビを使わずに、その端末1台でCPUを相手に遊べます。テレビの画面は上に小さく表示されます。ルールの確認や練習に使えます。
 
 ## まず試験モードで試す(Firebase の設定は不要)
 

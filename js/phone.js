@@ -134,16 +134,16 @@ function ctlHTML() {
     reveal: b('next', '次へ', 1),
     score: b('round', S.round >= S.set.rounds ? '最終ラウンドへ' : '次のラウンドへ', 1),
     end: b('again', 'もう一度') + b('diag', '性格診断を見る', 1),
-    type: b('lobby', '待合に戻る') + b('again', 'もう一度', 1)
+    type: b('lobby', window.BK_SOLO ? '設定に戻る' : '待合に戻る') + b('again', 'もう一度', 1)
   })[S.phase] || '';
 }
 function render() {
   if (!joined) return;
   const body = document.body;
-  if (closed || !S) { patch($('#pm'), 'closed', `<p class="st dg">部屋が閉じられました</p><p class="mu">テレビの画面が閉じられたか、通信が切れています。</p><p class="mu" style="margin-top:20px"><a href="phone.html${location.search}">参加画面に戻る</a></p>`); ['#pn', '#pc', '#pctl'].forEach(s => patch($(s), '', '')); return; }
+  if (closed || !S) { patch($('#pm'), 'closed', `<p class="st dg">部屋が閉じられました</p><p class="mu">テレビの画面が閉じられたか、通信が切れています。</p><p class="mu" style="margin-top:20px"><a href="${window.BK_SOLO ? 'solo.html' : 'phone.html' + location.search}">${window.BK_SOLO ? '最初の画面に戻る' : '参加画面に戻る'}</a></p>`); ['#pn', '#pc', '#pctl'].forEach(s => patch($(s), '', '')); return; }
   const me = P(uid), t = now();
   const victim = S.phase === 'boom' && S.boom && S.boom.victim === uid; if (victim && !body.classList.contains('red')) buzz([300, 80, 300]); body.classList.toggle('red', victim);
-  patch($('#sb'), JSON.stringify([me && me.name, S.round, S.final, S.room]), `<b>${esc(me ? me.name : '')}</b><span>部屋 ${esc(S.room)}${S.round ? ` ・ ${S.final ? '最終ラウンド' : `第${S.round}ラウンド`}` : ''}</span>`);
+  patch($('#sb'), JSON.stringify([me && me.name, S.round, S.final, S.room]), `<b>${esc(me ? me.name : '')}</b><span>${window.BK_SOLO ? 'スマホだけで試す' : `部屋 ${esc(S.room)}`}${S.round ? ` ・ ${S.final ? '最終ラウンド' : `第${S.round}ラウンド`}` : ''}</span>`);
   // お知らせ
   if (V.note && V.note.id !== noteSeen) { noteSeen = V.note.id; noteShow = V.note.text; noteUntil = t + 5000; Object.keys(sending).forEach(k => delete sending[k]); }
   const notes = []; if (t < noteUntil) notes.push(`<p class="note">${esc(noteShow)}</p>`);
@@ -174,7 +174,7 @@ function render() {
     patch(pm, k, h);
     const bc = pm.querySelector('[data-live="boom"]'); if (bc && S.boom) bc.textContent = Math.max(0, S.boom.left - Math.floor((now() - pubAt) / 1000));
   }
-  const tb = S.phase === 'play' ? idleTarget() : null, hideHand = victim || ['type', 'lobby'].includes(S.phase);
+  const tb = S.phase === 'play' ? idleTarget() : null, hideHand = victim || ['type', 'lobby', 'end'].includes(S.phase);
   patch($('#pc'), hideHand ? 'none' : JSON.stringify([S.phase, myCards(), tb && [tb.id, tb.holder, tb.idle, !!tb.extra, (V.yogen || []).includes(tb.id)], live().filter(b => b.holder !== uid).length]), hideHand ? '' : handHTML());
   patch($('#pctl'), JSON.stringify([S.phase, S.ctrl === uid, S.players.length, S.round]), ctlHTML());
 }
@@ -254,19 +254,25 @@ function joinForm(msg) {
     if (code.length !== 4) return joinForm('部屋コードは4文字です。');
     if (!name) return joinForm('名前を入れてください。');
     f.querySelector('button').disabled = true; f.querySelector('button').textContent = '接続中';
-    const r = await net.join(code, name);
+    const r = await doJoin(code, name);
     if (!r.ok) return joinForm(r.err);
-    try { localStorage.setItem('bk-join', JSON.stringify({ code, name })); } catch (x) { }
-    joined = true; $('#pm').innerHTML = ''; delete $('#pm').dataset.key;
-    net.onPub(v => { if (v == null) { if (S) closed = true; S = null; } else { S = v; S.players = S.players || []; S.bombs = S.bombs || []; pubAt = now(); closed = false; } render(); });
-    net.onPriv(v => { V = v || {}; render(); });
   });
+}
+async function doJoin(code, name) {
+  const r = await net.join(code, name);
+  if (!r.ok) return r;
+  try { localStorage.setItem('bk-join', JSON.stringify({ code, name })); } catch (x) { }
+  joined = true; $('#pm').innerHTML = ''; delete $('#pm').dataset.key;
+  net.onPub(v => { if (v == null) { if (S) closed = true; S = null; } else { S = v; S.players = S.players || []; S.bombs = S.bombs || []; pubAt = now(); closed = false; } render(); });
+  net.onPriv(v => { V = v || {}; render(); });
+  return r;
 }
 (async () => {
   try { net = await createNet(); }
   catch (e) { $('#pm').innerHTML = `<p class="st dg">接続できませんでした</p><p class="mu">${esc(e.message || e)}</p>`; return; }
   uid = net.uid;
   if (net.mode === 'local') document.body.classList.add('local');
-  joinForm();
+  if (window.BK_SOLO) { while (!window.BK_ROOM) await new Promise(r => setTimeout(r, 50)); await doJoin(window.BK_ROOM, window.BK_SOLO.name); }
+  else joinForm();
   setInterval(render, 250);
 })();

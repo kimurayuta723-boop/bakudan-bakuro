@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#fbfaf8">
+<title>ばくだん暴露 スマホだけで試す</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="php solo">
+<main class="scr" id="setup">
+  <h1 class="dg jt">スマホだけで試す</h1>
+  <p class="mu">この端末1台で、CPUを相手に遊びます。テレビの画面は上に小さく表示されます。通信は使いません。</p>
+  <form id="sf" class="jf sf" novalidate>
+    <label><span>あなたの名前(8文字まで)</span><input name="name" maxlength="8" autocomplete="nickname"></label>
+    <fieldset><legend>CPUの人数</legend><div class="seg">
+      <label><input type="radio" name="cpus" value="2">2人</label><label><input type="radio" name="cpus" value="3">3人</label>
+      <label><input type="radio" name="cpus" value="4" checked>4人</label><label><input type="radio" name="cpus" value="6">6人</label></div></fieldset>
+    <fieldset><legend>過激度</legend><div class="seg">
+      <label><input type="radio" name="level" value="1">1 ゆるめ</label><label><input type="radio" name="level" value="2" checked>2 ふつう</label><label><input type="radio" name="level" value="3">3 きわどい</label></div></fieldset>
+    <fieldset><legend>カード</legend><div class="seg">
+      <label><input type="radio" name="extra" value="0">基本 7種</label><label><input type="radio" name="extra" value="1" checked>基本+追加 11種</label></div></fieldset>
+    <fieldset><legend>ラウンド数</legend><div class="seg">
+      <label><input type="radio" name="rounds" value="3" checked>3+最終</label><label><input type="radio" name="rounds" value="5">5+最終</label></div></fieldset>
+    <fieldset><legend>導火線</legend><div class="seg">
+      <label><input type="radio" name="short" value="1" checked>短め 20〜50秒</label><label><input type="radio" name="short" value="0">本番 40〜120秒</label></div></fieldset>
+    <p class="err" id="serr"></p>
+    <button class="go" type="submit">はじめる</button>
+  </form>
+  <p class="mu back"><a href="index.html">入口に戻る</a></p>
+</main>
+<div class="tv" id="tv" hidden><div class="in"></div></div>
+<div id="host" hidden></div>
+<div class="scr" id="pwrap" hidden><div class="sb" id="sb"></div><div id="pn"></div><div id="pm"></div><div id="pc"></div></div>
+<div id="pctl"></div>
+<script type="module">
+const f = document.getElementById('sf');
+try { const s = JSON.parse(localStorage.getItem('bk-join') || '{}'); if (s.name) f.name.value = s.name; } catch (e) { }
+f.addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = f.name.value.trim().slice(0, 8);
+  if (!name) { document.getElementById('serr').textContent = '名前を入れてください。'; return; }
+  window.BK_FORCE_LOCAL = true;
+  window.BK_SOLO = { name, cpus: +f.cpus.value, set: { level: +f.level.value, extra: f.extra.value === '1', rounds: +f.rounds.value, short: f.short.value === '1' } };
+  try { sessionStorage.removeItem('bk-uid'); } catch (x) { }
+  document.getElementById('setup').hidden = true;
+  document.getElementById('tv').hidden = false;
+  document.getElementById('pwrap').hidden = false;
+  await import('./js/tv.js');
+  await import('./js/phone.js');
+});
+</script>
+</body>
+</html>

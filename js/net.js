@@ -5,7 +5,7 @@ import { FIREBASE_CONFIG } from './config.js';
 const FB = '10.12.2';
 const CODE_CHARS = 'ACDEFHJKLMNPRTUVWXY'; // 読み間違えやすい文字を除く
 
-export const isLocal = () => new URLSearchParams(location.search).has('local') || !FIREBASE_CONFIG.apiKey;
+export const isLocal = () => !!window.BK_FORCE_LOCAL || new URLSearchParams(location.search).has('local') || !FIREBASE_CONFIG.apiKey;
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
 export async function createNet() { return isLocal() ? localNet() : firebaseNet(); }
